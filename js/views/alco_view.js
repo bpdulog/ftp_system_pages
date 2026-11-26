@@ -8,7 +8,7 @@ export async function renderAlco(host, ctx) {
     const runs = state.calculation_runs.filter(r => r.run_type === 'ftp' && r.status === 'completed').sort((a, b) => b.id - a.id);
 
     if (!runs.length) {
-        host.innerHTML = `<div class="card empty-state"><div class="empty-icon"><i class="fas fa-briefcase"></i></div><h2>ALCO Reports</h2><p>No completed FTP runs yet. Run a calculation from the dashboard or load the Sample Bank to export Excel &amp; PowerPoint ALCO packs.</p><div class="actions" style="justify-content:center;"><button class="btn demo-button" id="btnAlcoDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button><a class="btn btn-primary" href="#/dashboard">Go to Dashboard</a></div></div>`;
+        host.innerHTML = `<div class="card empty-state"><div class="empty-icon"><i class="fas fa-briefcase"></i></div><h2>ALCO Reports</h2><p>No completed FTP runs yet. Load the Sample Bank, import instruments, or run FTP from the Dashboard to export Excel &amp; PowerPoint ALCO packs.</p><div class="actions" style="justify-content:center;"><button class="btn demo-button" id="btnAlcoDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button><a class="btn btn-primary" href="#/import"><i class="fas fa-file-upload"></i> Import CSV / Excel</a><a class="btn" href="#/dashboard">Go to Dashboard</a></div></div>`;
         document.getElementById('btnAlcoDemo')?.addEventListener('click', switchToDemo);
         return;
     }

@@ -45,30 +45,35 @@ export async function renderDashboard(host, ctx) {
     const charts = pack ? chartPayload(pack) : null;
     const bs = pack?.balance_sheet;
 
+    if (state.instruments.length === 0) {
+        host.innerHTML = `
+        <section class="hero-panel">
+            <span class="hero-eyebrow"><i class="fas fa-sparkles"></i> Institutional Treasury &amp; ALM Platform</span>
+            <h2>Matched-Maturity Funds Transfer Pricing, Built for Speed &amp; Auditability</h2>
+            <p>Price commercial loans and term deposits against versioned SOFR &amp; Treasury curves, run repricing gap and regulatory stress tests, and export board-ready Excel &amp; PowerPoint ALCO packs directly in your browser.</p>
+            <div class="hero-grid">
+                <button class="hero-action-card" id="btnHeroDemo" type="button">
+                    <i class="fas fa-university"></i>
+                    <strong>Load Sample Bank (13 Instruments)</strong>
+                    <span>Explore a complete commercial &amp; retail portfolio with SOFR curves, reporting lines, and ALCO analytics.</span>
+                </button>
+                <a class="hero-action-card" href="#/import">
+                    <i class="fas fa-file-excel"></i>
+                    <strong>Import CSV or Excel Book</strong>
+                    <span>Drag-and-drop your loan &amp; deposit tape with interactive column mapping and strict validation.</span>
+                </a>
+                <a class="hero-action-card" href="#/instruments/new">
+                    <i class="fas fa-plus-circle"></i>
+                    <strong>Book Single Instrument</strong>
+                    <span>Add a loan or CD manually, lock its origination curve rate, and inspect its cash flow schedule.</span>
+                </a>
+            </div>
+        </section>`;
+        document.getElementById('btnHeroDemo')?.addEventListener('click', switchToDemo);
+        return;
+    }
+
     host.innerHTML = `
-    ${state.instruments.length === 0 ? `
-    <section class="hero-panel">
-        <span class="hero-eyebrow"><i class="fas fa-sparkles"></i> Institutional Treasury &amp; ALM Platform</span>
-        <h2>Matched-Maturity Funds Transfer Pricing, Built for Speed &amp; Auditability</h2>
-        <p>Price commercial loans and term deposits against versioned SOFR &amp; Treasury curves, run repricing gap and regulatory stress tests, and export board-ready Excel &amp; PowerPoint ALCO packs directly in your browser.</p>
-        <div class="hero-grid">
-            <button class="hero-action-card" id="btnHeroDemo" type="button">
-                <i class="fas fa-university"></i>
-                <strong>Load Sample Bank (13 Instruments)</strong>
-                <span>Explore a complete commercial &amp; retail portfolio with SOFR curves, reporting lines, and ALCO analytics.</span>
-            </button>
-            <a class="hero-action-card" href="#/import">
-                <i class="fas fa-file-excel"></i>
-                <strong>Import CSV or Excel Book</strong>
-                <span>Drag-and-drop your loan &amp; deposit tape with interactive column mapping and strict validation.</span>
-            </a>
-            <a class="hero-action-card" href="#/instruments/new">
-                <i class="fas fa-plus-circle"></i>
-                <strong>Book Single Instrument</strong>
-                <span>Add a loan or CD manually, lock its origination curve rate, and inspect its cash flow schedule.</span>
-            </a>
-        </div>
-    </section>` : `
     <div class="card">
         <div class="heading">
             <div>
@@ -100,7 +105,7 @@ export async function renderDashboard(host, ctx) {
             <button class="btn btn-primary" type="submit"><i class="fas fa-play"></i> Run FTP Calculation</button>
             ${latestRun && scopedRows.length ? `<a class="btn btn-sm" id="linkRunCsv" href="#" style="margin-left:auto;"><i class="fas fa-download"></i> Run #${latestRun.id} (${esc(selectedCcy)}) CSV</a>` : ''}
         </form>
-    </div>`}
+    </div>
 
     <div class="metrics-grid">
         <div class="metric-card">

@@ -25,9 +25,14 @@ export async function renderCurve(host, ctx) {
     const sofrVersions = state.yield_curves.filter(c => c.name === 'SOFR').sort((a, b) => b.effective_date.localeCompare(a.effective_date));
     const treasuryVersions = state.yield_curves.filter(c => c.name === 'TREASURY').sort((a, b) => b.effective_date.localeCompare(a.effective_date));
     const activeSofr = sofrVersions[0] || null;
-    const activeTreasury = treasuryVersions[0] || null;
+    const derivedParent = activeSofr?.derived_from_curve_id
+        ? state.yield_curves.find(c => c.id === activeSofr.derived_from_curve_id)
+        : null;
+    const activeTreasury = derivedParent || treasuryVersions[0] || null;
 
-    const basisBps = activeSofr ? Number(activeSofr.basis_adjustment_bps || 10) : 10;
+    const isDerivedFromActiveTreasury = Boolean(activeSofr && activeTreasury && activeSofr.derived_from_curve_id === activeTreasury.id);
+    const basisBps = activeSofr && activeSofr.basis_adjustment_bps != null ? Number(activeSofr.basis_adjustment_bps) : null;
+    const formatSignedBps = (v) => (v == null ? '&mdash;' : `${v >= 0 ? '+' : ''}${v.toFixed(1)} bps`);
     const sofrPts = [...(activeSofr?.points || [])].sort((a, b) => a.tenor_days - b.tenor_days);
     const treasuryMap = new Map((activeTreasury?.points || []).map(p => [Number(p.tenor_days), p.rate]));
     const t10 = treasuryMap.get(3650);
@@ -50,7 +55,7 @@ export async function renderCurve(host, ctx) {
         </div>
         <div class="metrics-grid" style="margin-top:1rem;margin-bottom:0;">
             <div class="metric-card"><div class="metric-label">Base Treasury CMT (10Y)</div><div class="metric-value">${t10 ? esc(fmtRatePct(t10, 2)) : '&mdash;'}</div></div>
-            <div class="metric-card warning"><div class="metric-label">Fixed Basis Adjustment</div><div class="metric-value">+${basisBps.toFixed(1)} bps</div></div>
+            <div class="metric-card warning"><div class="metric-label">Fixed Basis Adjustment</div><div class="metric-value">${isDerivedFromActiveTreasury && basisBps != null ? formatSignedBps(basisBps) : '&mdash;'}</div></div>
             <div class="metric-card positive"><div class="metric-label">Synthetic SOFR (10Y)</div><div class="metric-value">${s10 ? esc(fmtRatePct(s10, 2)) : '&mdash;'}</div></div>
             <div class="metric-card"><div class="metric-label">Active SOFR Date</div><div class="metric-value" style="font-size:1.25rem;">${activeSofr ? esc(activeSofr.effective_date) : 'None'}</div></div>
         </div>
@@ -79,15 +84,18 @@ export async function renderCurve(host, ctx) {
                 <tbody>
                     ${sofrPts.map(pt => {
                         const tr = treasuryMap.get(Number(pt.tenor_days));
-                        const r = Number(pt.rate);
+                        const rDec = Dec.from(pt.rate);
+                        const rowBasis = isDerivedFromActiveTreasury && basisBps != null
+                            ? formatSignedBps(basisBps)
+                            : (tr != null ? formatSignedBps(rDec.sub(tr).mul(10000).toNumber()) : '&mdash;');
                         return `<tr>
                             <td><strong>${esc(TENOR_NAMES[pt.tenor_days] || `${pt.tenor_days} Days`)}</strong></td>
                             <td>${pt.tenor_days}</td>
                             <td class="num">${tr != null ? esc(fmtRatePct(tr, 3)) : '&mdash;'}</td>
-                            <td class="num">+${basisBps.toFixed(1)} bps</td>
-                            <td class="num"><strong>${esc(fmtRatePct(r, 3))}</strong></td>
-                            <td class="num rate-positive">${esc(fmtRatePct(r + 0.0020, 3))}</td>
-                            <td class="num">${esc(fmtRatePct(r - 0.0005, 3))}</td>
+                            <td class="num">${rowBasis}</td>
+                            <td class="num"><strong>${esc(fmtRatePct(rDec.toNumber(), 3))}</strong></td>
+                            <td class="num rate-positive">${esc(fmtRatePct(rDec.add('0.0020').toNumber(), 3))}</td>
+                            <td class="num">${esc(fmtRatePct(rDec.sub('0.0005').toNumber(), 3))}</td>
                         </tr>`;
                     }).join('') || '<tr><td colspan="7" class="muted">No active SOFR curve points.</td></tr>'}
                 </tbody>

@@ -191,6 +191,18 @@ test('sample bank initialization, ALCO pack reconciliation, repricing gap & stre
     assert.equal(matrix.length, 7);
     const up200 = simulateYieldCurveShock(store.state, { scenarioKey: 'parallel_up_200', depositBeta: '0.40', curveName: 'SOFR' });
     assert.equal(up200.scenario_key, 'parallel_up_200');
+
+    // Verify Sample Bank SOFR curve is strictly equal to Treasury + basis_adjustment_bps / 10000
+    const sofr = store.state.yield_curves.find(c => c.name === 'SOFR');
+    const treasury = store.state.yield_curves.find(c => c.id === sofr.derived_from_curve_id);
+    assert.ok(sofr && treasury);
+    const basisDec = Dec.from(sofr.basis_adjustment_bps).div(10000);
+    const treasByTenor = new Map(treasury.points.map(p => [p.tenor_days, Dec.from(p.rate)]));
+    for (const pt of sofr.points) {
+        const tr = treasByTenor.get(pt.tenor_days);
+        assert.ok(tr, `Missing Treasury tenor ${pt.tenor_days}`);
+        assert.equal(Dec.from(pt.rate).toFixed(6), tr.add(basisDec).round(6).toFixed(6));
+    }
 });
 
 test('CSV importer normalizes rates, principals, terms, and dates', () => {

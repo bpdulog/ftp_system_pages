@@ -11,7 +11,7 @@ export async function renderExecutive(host, ctx) {
         .sort((a, b) => b.id - a.id);
 
     if (!runs.length) {
-        host.innerHTML = `<div class="card empty-state"><div class="empty-icon"><i class="fas fa-chart-pie"></i></div><h2>Executive Summary</h2><p>No completed FTP runs yet. Run a calculation from the dashboard or load the Sample Bank to preview executive reporting.</p><div class="actions" style="justify-content:center;"><button class="btn demo-button" id="btnExecDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button><a class="btn btn-primary" href="#/dashboard">Go to Dashboard</a></div></div>`;
+        host.innerHTML = `<div class="card empty-state"><div class="empty-icon"><i class="fas fa-chart-pie"></i></div><h2>Executive Summary</h2><p>No completed FTP runs yet. Load the Sample Bank, import instruments, or run a calculation from the Dashboard.</p><div class="actions" style="justify-content:center;"><button class="btn demo-button" id="btnExecDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button><a class="btn btn-primary" href="#/import"><i class="fas fa-file-upload"></i> Import CSV / Excel</a><a class="btn" href="#/dashboard">Go to Dashboard</a></div></div>`;
         document.getElementById('btnExecDemo')?.addEventListener('click', switchToDemo);
         return;
     }

@@ -5,8 +5,23 @@ import {
 import { esc, fmtCurrency, showToast, mountChart, ChartTheme } from '../ui.js';
 
 export async function renderStress(host, ctx) {
-    const { store, params, navigate } = ctx;
+    const { store, params, navigate, switchToDemo } = ctx;
     const state = store.state;
+    if (state.instruments.length === 0) {
+        host.innerHTML = `
+        <div class="card empty-state">
+            <div class="empty-icon"><i class="fas fa-bolt"></i></div>
+            <h2>Yield Curve Stress Testing</h2>
+            <p>No instruments in this portfolio yet. Load the Sample Bank or import instruments to simulate Basel parallel and non-parallel curve shocks.</p>
+            <div class="actions" style="justify-content:center;">
+                <button class="btn demo-button" id="btnStressDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button>
+                <a class="btn btn-primary" href="#/import"><i class="fas fa-file-upload"></i> Import CSV / Excel</a>
+                <a class="btn" href="#/instruments/new"><i class="fas fa-plus"></i> Add Instrument</a>
+            </div>
+        </div>`;
+        document.getElementById('btnStressDemo')?.addEventListener('click', switchToDemo);
+        return;
+    }
     if (!state.yield_curves.some(c => c.name === 'SOFR')) {
         ensureTreasuryCurve(store, todayIso());
         await deriveSyntheticSofrCurve(store, { basisAdjustmentBps: '10.0', effectiveDate: todayIso(), curveName: 'SOFR' });

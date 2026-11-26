@@ -9,10 +9,26 @@ import {
 } from '../ui.js';
 
 export async function renderInstruments(host, ctx) {
-    const { store, params, rerender, navigate } = ctx;
+    const { store, params, rerender, navigate, switchToDemo } = ctx;
     const state = store.state;
     const typeFilter = params.get('type') || '';
     const search = (params.get('q') || '').trim().toLowerCase();
+
+    if (state.instruments.length === 0) {
+        host.innerHTML = `
+        <div class="card empty-state">
+            <div class="empty-icon"><i class="fas fa-file-invoice-dollar"></i></div>
+            <h2>No Instruments Booked Yet</h2>
+            <p>Load the 13-instrument Sample Bank to explore a populated loan &amp; deposit portfolio, or import your own CSV/Excel book.</p>
+            <div class="actions" style="justify-content:center;">
+                <button class="btn demo-button" id="btnInstDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button>
+                <a class="btn btn-primary" href="#/import"><i class="fas fa-file-upload"></i> Import CSV / Excel</a>
+                <a class="btn" href="#/instruments/new"><i class="fas fa-plus"></i> Add Instrument</a>
+            </div>
+        </div>`;
+        document.getElementById('btnInstDemo')?.addEventListener('click', switchToDemo);
+        return;
+    }
 
     const latestRun = getLatestFtpRun(state);
     const latestResults = latestRun ? new Map(getRunResults(state, latestRun.id).map(r => [r.instrument_id, r])) : new Map();

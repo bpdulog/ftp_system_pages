@@ -63,7 +63,6 @@ function updateChrome(path, title) {
 
     const isDemo = store.mode === 'demo';
     const badgeHost = document.getElementById('sidebarDemoBadge');
-    const switchHost = document.getElementById('sidebarDemoSwitch');
     const bannerHost = document.getElementById('demoBannerHost');
     const statusText = document.getElementById('storageStatusText');
     const topModePill = document.getElementById('topModePill');
@@ -76,24 +75,17 @@ function updateChrome(path, title) {
     }
     if (topModePill) {
         topModePill.innerHTML = isDemo
-            ? `<button class="mode-pill is-demo" id="btnTopModeSwitch" type="button" title="Switch back to Live Bank"><i class="fas fa-flask"></i> Sample Bank &middot; Exit</button>`
-            : `<button class="mode-pill" id="btnTopModeSwitch" type="button" title="Load 13-instrument Sample Bank"><i class="fas fa-university"></i> Try Sample Bank</button>`;
+            ? `<button class="mode-pill is-demo" id="btnTopModeSwitch" type="button" title="Return to your Live Bank"><i class="fas fa-flask"></i> Sample Bank &middot; Exit</button>`
+            : `<button class="mode-pill" id="btnTopModeSwitch" type="button" title="Load 13-instrument Sample Bank"><i class="fas fa-university"></i> Load Sample Bank</button>`;
         document.getElementById('btnTopModeSwitch')?.addEventListener('click', isDemo ? switchToLive : switchToDemo);
-    }
-    if (switchHost) {
-        switchHost.innerHTML = isDemo
-            ? `<button class="nav-link" id="btnSwitchLiveSide" type="button"><i class="fas fa-arrow-left"></i><span>Return to My Bank</span></button>`
-            : `<button class="nav-link" id="btnSwitchDemoSide" type="button"><i class="fas fa-university"></i><span>Load Example Bank</span></button>`;
-        document.getElementById('btnSwitchDemoSide')?.addEventListener('click', switchToDemo);
-        document.getElementById('btnSwitchLiveSide')?.addEventListener('click', switchToLive);
     }
     if (bannerHost) {
         bannerHost.innerHTML = isDemo
             ? `<div class="demo-banner">
-                <span><strong>Sample bank mode.</strong> Exploring 13 fictional commercial loans &amp; term deposits in an isolated browser workspace.</span>
+                <span><strong>Sample Bank mode.</strong> Exploring 13 fictional commercial loans &amp; term deposits in an isolated browser workspace.</span>
                 <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
                     <button class="btn btn-sm" id="btnResetDemo" type="button"><i class="fas fa-rotate-left"></i> Reset sample</button>
-                    <button class="btn btn-sm btn-primary" id="btnSwitchLiveBanner" type="button">Return to my bank</button>
+                    <button class="btn btn-sm btn-primary" id="btnSwitchLiveBanner" type="button">Return to Live Bank</button>
                 </div>
                </div>`
             : '';
@@ -101,7 +93,7 @@ function updateChrome(path, title) {
         document.getElementById('btnResetDemo')?.addEventListener('click', async () => {
             await store.reset(true);
             await initializeDemoBank(store);
-            showToast('Sample bank reset to initial fixtures.', 'success');
+            showToast('Sample Bank reset to initial fixtures.', 'success');
             await renderCurrentRoute();
         });
     }
@@ -111,7 +103,7 @@ export async function switchToDemo() {
     BankStore.setSavedMode('demo');
     await store.load('demo');
     await initializeDemoBank(store);
-    showToast('Loaded Example Bank (isolated browser demo).', 'success');
+    showToast('Loaded Sample Bank (isolated browser demo).', 'success');
     await renderCurrentRoute();
 }
 

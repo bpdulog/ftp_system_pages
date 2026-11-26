@@ -2,42 +2,51 @@
  * Isolated, deterministic sample bank used by the Sample Bank mode.
  * Port of app/demo.py.
  */
-import { calculateAllFtp, ensureTreasuryCurve } from './engine.js';
+import { calculateAllFtp, deriveSyntheticSofrCurve } from './engine.js';
+
+const DEMO_CURVE_VERSION = 'demo-2';
 
 export async function initializeDemoBank(store) {
     const state = store.state;
-    if (state.instruments.length > 0 && state.calculation_runs.some(r => r.run_type === 'ftp' && r.status === 'completed')) {
+    const hasCurrentDemo = state.instruments.length > 0
+        && state.calculation_runs.some(r => r.run_type === 'ftp' && r.status === 'completed')
+        && state.yield_curves.some(c => c.name === 'SOFR' && c.version === DEMO_CURVE_VERSION);
+    if (hasCurrentDemo) {
         return state;
     }
     await store.reset(true);
     const s = store.state;
     const now = new Date().toISOString();
 
-    ensureTreasuryCurve(store, '2025-01-31');
+    const treasuryCurve = {
+        id: store.nextId('yield_curves'),
+        name: 'TREASURY',
+        description: 'Synthetic training U.S. Treasury CMT curve for the fictional sample bank',
+        effective_date: '2025-01-31',
+        source: 'Synthetic sample fixture',
+        version: DEMO_CURVE_VERSION,
+        basis_adjustment_bps: '0.00',
+        derived_from_curve_id: null,
+        created_at: now,
+        points: [
+            { tenor_days: 1, rate: '0.042000' },
+            { tenor_days: 90, rate: '0.040500' },
+            { tenor_days: 365, rate: '0.038000' },
+            { tenor_days: 1095, rate: '0.035500' },
+            { tenor_days: 1825, rate: '0.035000' },
+            { tenor_days: 3650, rate: '0.036500' },
+        ],
+    };
+    s.yield_curves.push(treasuryCurve);
 
-    let curve = s.yield_curves.find(c => c.name === 'SOFR');
-    if (!curve) {
-        curve = {
-            id: store.nextId('yield_curves'),
-            name: 'SOFR',
-            description: 'Synthetic training curve for the fictional sample bank',
-            effective_date: '2025-01-31',
-            source: 'Synthetic sample fixture',
-            version: 'demo-1',
-            basis_adjustment_bps: '10.00',
-            derived_from_curve_id: s.yield_curves[0]?.id || null,
-            created_at: now,
-            points: [
-                { tenor_days: 1, rate: '0.043000' },
-                { tenor_days: 90, rate: '0.041500' },
-                { tenor_days: 365, rate: '0.039000' },
-                { tenor_days: 1095, rate: '0.036500' },
-                { tenor_days: 1825, rate: '0.036000' },
-                { tenor_days: 3650, rate: '0.037500' },
-            ],
-        };
-        s.yield_curves.push(curve);
-    }
+    const curve = await deriveSyntheticSofrCurve(store, {
+        treasuryCurveId: treasuryCurve.id,
+        basisAdjustmentBps: '10.0',
+        effectiveDate: '2025-01-31',
+        curveName: 'SOFR',
+        description: 'Synthetic SOFR derived from Sample Bank Treasury (2025-01-31) with +10.0 bps fixed basis adjustment',
+    });
+    curve.version = DEMO_CURVE_VERSION;
 
     const loanBucket = {
         id: store.nextId('buckets'),

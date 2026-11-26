@@ -3,9 +3,24 @@ import { runCurrencies } from '../alco.js';
 import { esc, openModal, closeModal, getRunResults } from '../ui.js';
 
 export async function renderRuns(host, ctx) {
-    const { store } = ctx;
+    const { store, switchToDemo } = ctx;
     const state = store.state;
     const runs = [...state.calculation_runs].sort((a, b) => b.id - a.id);
+
+    if (!runs.length) {
+        host.innerHTML = `
+        <div class="card empty-state">
+            <div class="empty-icon"><i class="fas fa-history"></i></div>
+            <h2>Calculation Runs</h2>
+            <p>No FTP or cash-flow calculation runs have been executed yet. Load the Sample Bank or run FTP from the Dashboard.</p>
+            <div class="actions" style="justify-content:center;">
+                <button class="btn demo-button" id="btnRunsDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button>
+                <a class="btn btn-primary" href="#/dashboard">Go to Dashboard</a>
+            </div>
+        </div>`;
+        document.getElementById('btnRunsDemo')?.addEventListener('click', switchToDemo);
+        return;
+    }
 
     host.innerHTML = `
     <div class="card">

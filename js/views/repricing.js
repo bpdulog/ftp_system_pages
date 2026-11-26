@@ -2,8 +2,23 @@ import { calculateRepricingGap, getHistoricalFtpTrends, generateAllCashFlows, to
 import { esc, fmtCurrency, fmtRatePct, showToast, mountChart, ChartTheme } from '../ui.js';
 
 export async function renderRepricing(host, ctx) {
-    const { store, params, navigate, rerender } = ctx;
+    const { store, params, navigate, rerender, switchToDemo } = ctx;
     const state = store.state;
+    if (state.instruments.length === 0) {
+        host.innerHTML = `
+        <div class="card empty-state">
+            <div class="empty-icon"><i class="fas fa-hourglass-half"></i></div>
+            <h2>Repricing Gap &amp; Margin Trends</h2>
+            <p>No instruments in this portfolio yet. Load the Sample Bank or import instruments to analyze ALM repricing gaps and margin compression.</p>
+            <div class="actions" style="justify-content:center;">
+                <button class="btn demo-button" id="btnRepDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button>
+                <a class="btn btn-primary" href="#/import"><i class="fas fa-file-upload"></i> Import CSV / Excel</a>
+                <a class="btn" href="#/instruments/new"><i class="fas fa-plus"></i> Add Instrument</a>
+            </div>
+        </div>`;
+        document.getElementById('btnRepDemo')?.addEventListener('click', switchToDemo);
+        return;
+    }
     const asOf = params.get('as_of_date') || todayIso();
 
     const gap = calculateRepricingGap(state, asOf);
