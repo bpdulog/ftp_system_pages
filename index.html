@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FTP System — Browser / GitHub Pages Edition</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="./css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h1><i class="fas fa-university"></i> FTP System</h1>
+            <span class="static-badge">CLIENT-SIDE EDITION</span>
+            <div id="sidebarDemoBadge"></div>
+        </div>
+        <div class="nav-menu">
+            <div class="nav-section-title">Overview</div>
+            <div class="nav-item"><a href="#/dashboard" class="nav-link" data-route="/dashboard"><i class="fas fa-home"></i><span>Dashboard</span></a></div>
+            <div class="nav-item"><a href="#/executive" class="nav-link" data-route="/executive"><i class="fas fa-chart-pie"></i><span>Executive Summary</span></a></div>
+
+            <div class="nav-section-title">Data</div>
+            <div class="nav-item"><a href="#/instruments" class="nav-link" data-route="/instruments"><i class="fas fa-file-invoice-dollar"></i><span>Instruments</span></a></div>
+            <div class="nav-item"><a href="#/instruments/new" class="nav-link" data-route="/instruments/new"><i class="fas fa-plus-circle"></i><span>Add Instrument</span></a></div>
+            <div class="nav-item"><a href="#/import" class="nav-link" data-route="/import"><i class="fas fa-file-upload"></i><span>Import Data</span></a></div>
+            <div class="nav-item" id="sidebarDemoSwitch"></div>
+
+            <div class="nav-section-title">Pricing Setup</div>
+            <div class="nav-item"><a href="#/curve" class="nav-link" data-route="/curve"><i class="fas fa-chart-line"></i><span>Yield Curve</span></a></div>
+            <div class="nav-item"><a href="#/buckets" class="nav-link" data-route="/buckets"><i class="fas fa-folder"></i><span>Pricing Buckets</span></a></div>
+            <div class="nav-item"><a href="#/groups" class="nav-link" data-route="/groups"><i class="fas fa-sitemap"></i><span>Reporting Groups</span></a></div>
+
+            <div class="nav-section-title">Reporting</div>
+            <div class="nav-item"><a href="#/analytics" class="nav-link" data-route="/analytics"><i class="fas fa-chart-bar"></i><span>FTP Analytics</span></a></div>
+            <div class="nav-item"><a href="#/alco" class="nav-link" data-route="/alco"><i class="fas fa-landmark"></i><span>ALCO Reports</span></a></div>
+            <div class="nav-item"><a href="#/runs" class="nav-link" data-route="/runs"><i class="fas fa-history"></i><span>Calculation Runs</span></a></div>
+            <div class="nav-item"><a href="#/repricing-gap" class="nav-link" data-route="/repricing-gap"><i class="fas fa-hourglass-half"></i><span>Repricing &amp; Trends</span></a></div>
+            <div class="nav-item"><a href="#/stress-test" class="nav-link" data-route="/stress-test"><i class="fas fa-bolt"></i><span>Stress Testing</span></a></div>
+
+            <div class="nav-section-title">Learning &amp; Backup</div>
+            <div class="nav-item"><a href="#/methodology" class="nav-link" data-route="/methodology"><i class="fas fa-graduation-cap"></i><span>Methodology &amp; Guide</span></a></div>
+            <div class="nav-item"><a href="#/backup" class="nav-link" data-route="/backup"><i class="fas fa-database"></i><span>Browser Backup</span></a></div>
+        </div>
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <i class="fas fa-hdd"></i>
+                <span id="storageStatusText">Local Browser Storage</span>
+            </div>
+        </div>
+    </aside>
+
+    <div class="main-content">
+        <header class="navbar">
+            <div style="display:flex;align-items:center;gap:1rem;min-width:0;">
+                <button class="menu-toggle" id="menuToggle" aria-label="Toggle navigation"><i class="fas fa-bars"></i></button>
+                <h1 id="pageTitle">Dashboard</h1>
+            </div>
+            <nav>
+                <a href="#/executive">Executive</a>
+                <a href="#/analytics">Analytics</a>
+                <a href="#/alco">ALCO</a>
+                <a href="#/runs">Runs</a>
+                <a href="#/repricing-gap">Repricing</a>
+                <a href="#/stress-test">Stress</a>
+                <a href="#/backup">Backup</a>
+            </nav>
+        </header>
+
+        <main class="container" id="main">
+            <div id="demoBannerHost"></div>
+            <div id="viewHost">
+                <div class="card"><p class="muted">Loading FTP System...</p></div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>FTP System &copy; 2026 | Matched Maturity Methodology · Runs 100% in your browser (IndexedDB / localStorage)</p>
+        </footer>
+    </div>
+
+    <div class="modal-overlay" id="appModal" role="dialog" aria-modal="true">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3 id="modalTitle">Modal</h3>
+                <button class="modal-close-btn" id="modalCloseBtn" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer" id="modalFooter"></div>
+        </div>
+    </div>
+
+    <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+    <script type="module" src="./js/app.js"></script>
+</body>
+</html>
