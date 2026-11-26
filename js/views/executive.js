@@ -4,14 +4,15 @@ import { exportAlcoAnalyticsCsv, exportAlcoWorkbook, exportAlcoDeck, openPrintab
 import { esc, showToast, mountChart, ChartTheme, getRunResults } from '../ui.js';
 
 export async function renderExecutive(host, ctx) {
-    const { store, params, navigate } = ctx;
+    const { store, params, navigate, switchToDemo } = ctx;
     const state = store.state;
     const runs = state.calculation_runs
         .filter(r => r.run_type === 'ftp' && r.status === 'completed')
         .sort((a, b) => b.id - a.id);
 
     if (!runs.length) {
-        host.innerHTML = `<div class="card"><div class="heading"><div><h2>Executive summary</h2><p>No completed FTP runs yet. Run a calculation from the dashboard to create a reportable snapshot.</p></div></div><div style="margin-top:1rem;"><a class="btn btn-primary" href="#/dashboard">Go to Dashboard</a></div></div>`;
+        host.innerHTML = `<div class="card empty-state"><div class="empty-icon"><i class="fas fa-chart-pie"></i></div><h2>Executive Summary</h2><p>No completed FTP runs yet. Run a calculation from the dashboard or load the Sample Bank to preview executive reporting.</p><div class="actions" style="justify-content:center;"><button class="btn demo-button" id="btnExecDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button><a class="btn btn-primary" href="#/dashboard">Go to Dashboard</a></div></div>`;
+        document.getElementById('btnExecDemo')?.addEventListener('click', switchToDemo);
         return;
     }
 

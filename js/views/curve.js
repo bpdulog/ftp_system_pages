@@ -277,8 +277,8 @@ export async function renderCurve(host, ctx) {
             data: {
                 labels,
                 datasets: [
-                    { label: 'Synthetic SOFR (%)', data: sofrPts.map(p => Number(p.rate) * 100), borderColor: P.navy, backgroundColor: P.navy, tension: 0.25 },
-                    { label: 'U.S. Treasury CMT (%)', data: sofrPts.map(p => treasuryMap.has(Number(p.tenor_days)) ? Number(treasuryMap.get(Number(p.tenor_days))) * 100 : null), borderColor: P.slate, borderDash: [5, 5], tension: 0.25 },
+                    { label: 'Synthetic SOFR (%)', data: sofrPts.map(p => Number(p.rate) * 100), borderColor: P.blue, backgroundColor: 'rgba(37, 87, 214, 0.12)', fill: true, tension: 0.32 },
+                    { label: 'U.S. Treasury CMT (%)', data: sofrPts.map(p => treasuryMap.has(Number(p.tenor_days)) ? Number(treasuryMap.get(Number(p.tenor_days))) * 100 : null), borderColor: P.slate, borderDash: [5, 5], tension: 0.32 },
                 ],
             },
             options: ChartTheme.baseOptions({ scales: { y: ChartTheme.pctTicks() } }),

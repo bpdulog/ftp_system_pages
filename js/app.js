@@ -1,9 +1,9 @@
 /**
- * SPA Router & Application Shell for FTP System (GitHub Pages Edition).
+ * SPA Router & Application Shell for TreasuryPulse FTP (GitHub Pages Edition).
  */
 import { BankStore } from './store.js';
 import { initializeDemoBank } from './demo.js';
-import { closeModal, destroyAllCharts, esc, showToast } from './ui.js';
+import { closeModal, destroyAllCharts, esc, showToast, syncChartDefaults } from './ui.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderExecutive } from './views/executive.js';
 import { renderInstruments, renderInstrumentForm, renderInstrumentDetail } from './views/instruments.js';
@@ -19,10 +19,28 @@ import { renderStress } from './views/stress.js';
 import { renderMethodology } from './views/methodology.js';
 import { renderBackup } from './views/backup.js';
 
+const THEME_KEY = 'ftp_pages_theme';
 const store = new BankStore(BankStore.getSavedMode());
 
 export function navigate(hashPath) {
     window.location.hash = hashPath.startsWith('#') ? hashPath : `#${hashPath}`;
+}
+
+function applyTheme(theme) {
+    const t = theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+    try { localStorage.setItem(THEME_KEY, t); } catch { /* ignore */ }
+    const btn = document.getElementById('themeToggleBtn');
+    if (btn) {
+        btn.innerHTML = t === 'dark' ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+        btn.title = t === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode';
+    }
+    syncChartDefaults();
+}
+
+function getSavedTheme() {
+    try { return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'; }
+    catch { return 'light'; }
 }
 
 function parseRoute() {
@@ -35,7 +53,7 @@ function parseRoute() {
 
 function updateChrome(path, title) {
     document.getElementById('pageTitle').textContent = title;
-    document.title = `${title} — FTP System`;
+    document.title = `${title} — TreasuryPulse FTP`;
 
     document.querySelectorAll('.nav-link[data-route]').forEach(el => {
         const base = el.getAttribute('data-route');
@@ -48,12 +66,19 @@ function updateChrome(path, title) {
     const switchHost = document.getElementById('sidebarDemoSwitch');
     const bannerHost = document.getElementById('demoBannerHost');
     const statusText = document.getElementById('storageStatusText');
+    const topModePill = document.getElementById('topModePill');
 
     if (badgeHost) {
-        badgeHost.innerHTML = isDemo ? '<span class="demo-badge">SAMPLE BANK</span>' : '';
+        badgeHost.innerHTML = isDemo ? '<span class="demo-badge"><i class="fas fa-flask"></i> SAMPLE BANK</span>' : '';
     }
     if (statusText) {
-        statusText.textContent = isDemo ? 'Demo DB (Browser)' : 'Live DB (Browser)';
+        statusText.textContent = isDemo ? 'Demo Store · IndexedDB' : 'Live Store · IndexedDB';
+    }
+    if (topModePill) {
+        topModePill.innerHTML = isDemo
+            ? `<button class="mode-pill is-demo" id="btnTopModeSwitch" type="button" title="Switch back to Live Bank"><i class="fas fa-flask"></i> Sample Bank &middot; Exit</button>`
+            : `<button class="mode-pill" id="btnTopModeSwitch" type="button" title="Load 13-instrument Sample Bank"><i class="fas fa-university"></i> Try Sample Bank</button>`;
+        document.getElementById('btnTopModeSwitch')?.addEventListener('click', isDemo ? switchToLive : switchToDemo);
     }
     if (switchHost) {
         switchHost.innerHTML = isDemo
@@ -65,7 +90,7 @@ function updateChrome(path, title) {
     if (bannerHost) {
         bannerHost.innerHTML = isDemo
             ? `<div class="demo-banner">
-                <span><strong>Sample bank mode.</strong> These 13 fictional instruments and illustrative calculations live in an isolated browser demo store, separate from your bank.</span>
+                <span><strong>Sample bank mode.</strong> Exploring 13 fictional commercial loans &amp; term deposits in an isolated browser workspace.</span>
                 <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
                     <button class="btn btn-sm" id="btnResetDemo" type="button"><i class="fas fa-rotate-left"></i> Reset sample</button>
                     <button class="btn btn-sm btn-primary" id="btnSwitchLiveBanner" type="button">Return to my bank</button>
@@ -102,6 +127,11 @@ async function renderCurrentRoute() {
     const host = document.getElementById('viewHost');
     destroyAllCharts();
 
+    // Restart subtle fade animation on view change
+    host.classList.remove('view-enter');
+    void host.offsetWidth;
+    host.classList.add('view-enter');
+
     const ctx = { store, params, navigate, rerender: renderCurrentRoute, switchToDemo, switchToLive };
     let title = 'Dashboard';
 
@@ -132,7 +162,7 @@ async function renderCurrentRoute() {
             updateChrome('/import', title);
             await renderImport(host, ctx);
         } else if (path === '/curve') {
-            title = 'Yield Curve';
+            title = 'Yield Curves';
             updateChrome('/curve', title);
             await renderCurve(host, ctx);
         } else if (path === '/buckets') {
@@ -164,11 +194,11 @@ async function renderCurrentRoute() {
             updateChrome('/stress-test', title);
             await renderStress(host, ctx);
         } else if (path === '/methodology') {
-            title = 'Methodology & Guide';
+            title = 'Methodology & Sandbox';
             updateChrome('/methodology', title);
             await renderMethodology(host, ctx);
         } else if (path === '/backup') {
-            title = 'Browser Backup & Storage';
+            title = 'Backup & Storage';
             updateChrome('/backup', title);
             await renderBackup(host, ctx);
         } else {
@@ -183,19 +213,27 @@ async function renderCurrentRoute() {
 }
 
 async function boot() {
+    applyTheme(getSavedTheme());
+
+    document.getElementById('themeToggleBtn')?.addEventListener('click', async () => {
+        const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+        await renderCurrentRoute();
+    });
+
     document.getElementById('menuToggle')?.addEventListener('click', () => {
         document.getElementById('sidebar')?.classList.toggle('active');
     });
     document.addEventListener('click', (e) => {
         const sidebar = document.getElementById('sidebar');
         const toggle = document.getElementById('menuToggle');
-        if (window.innerWidth <= 900 && sidebar?.classList.contains('active') && !sidebar.contains(e.target) && !toggle?.contains(e.target)) {
+        if (window.innerWidth <= 960 && sidebar?.classList.contains('active') && !sidebar.contains(e.target) && !toggle?.contains(e.target)) {
             sidebar.classList.remove('active');
         }
     });
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', () => {
-            if (window.innerWidth <= 900) document.getElementById('sidebar')?.classList.remove('active');
+            if (window.innerWidth <= 960) document.getElementById('sidebar')?.classList.remove('active');
         });
     });
     document.getElementById('modalCloseBtn')?.addEventListener('click', closeModal);

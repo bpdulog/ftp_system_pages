@@ -113,8 +113,8 @@ export async function renderStress(host, ctx) {
             data: {
                 labels: sim.shocked_curve_points.map(p => `${p.tenor_days}d`),
                 datasets: [
-                    { label: 'Baseline Curve (%)', data: sim.shocked_curve_points.map(p => p.baseline_rate), borderColor: P.slate, borderDash: [5, 5], tension: 0.2 },
-                    { label: 'Shocked Curve (%)', data: sim.shocked_curve_points.map(p => p.shocked_rate), borderColor: P.red, tension: 0.2 },
+                    { label: 'Baseline Curve (%)', data: sim.shocked_curve_points.map(p => p.baseline_rate), borderColor: P.slate, borderDash: [5, 5], tension: 0.32 },
+                    { label: 'Shocked Curve (%)', data: sim.shocked_curve_points.map(p => p.shocked_rate), borderColor: P.red, backgroundColor: 'rgba(220, 38, 38, 0.10)', fill: true, tension: 0.32 },
                 ],
             },
             options: ChartTheme.baseOptions({ scales: { y: ChartTheme.pctTicks() } }),

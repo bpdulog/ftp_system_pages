@@ -69,26 +69,59 @@ export function destroyAllCharts() {
     }
 }
 
+export function isDarkTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'dark';
+}
+
+export function syncChartDefaults() {
+    if (typeof Chart === 'undefined') return;
+    const dark = isDarkTheme();
+    Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.color = dark ? '#94a3b8' : '#64748b';
+    Chart.defaults.borderColor = dark ? 'rgba(148, 163, 184, 0.14)' : 'rgba(148, 163, 184, 0.22)';
+}
+
 export function mountChart(canvasId, config) {
     if (typeof Chart === 'undefined') return null;
+    syncChartDefaults();
     const canvas = document.getElementById(canvasId);
     if (!canvas) return null;
+
+    // Enhance bar datasets with subtle rounded corners unless already set
+    if (config.data?.datasets) {
+        for (const ds of config.data.datasets) {
+            const kind = ds.type || config.type;
+            if (kind === 'bar' && ds.borderRadius === undefined) {
+                ds.borderRadius = 6;
+                ds.maxBarThickness = 44;
+            }
+            if (kind === 'line' && ds.pointRadius === undefined) {
+                ds.pointRadius = 3.5;
+                ds.pointHoverRadius = 5.5;
+                ds.borderWidth = 2.5;
+            }
+        }
+    }
+
     const chart = new Chart(canvas, config);
     activeCharts.push(chart);
     return chart;
 }
 
 export const ChartTheme = (() => {
-    if (typeof Chart !== 'undefined') {
-        Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-        Chart.defaults.font.size = 12;
-        Chart.defaults.color = '#64748b';
-        Chart.defaults.borderColor = '#e2e8f0';
-    }
+    syncChartDefaults();
     const palette = {
-        navy: '#1b376f', blue: '#2f6fb3', teal: '#0f766e', green: '#2a9d8f',
-        amber: '#d97706', orange: '#d98e04', red: '#b42318', slate: '#64748b',
-        purple: '#6d5bd0', pink: '#b45309',
+        navy: '#3b82f6',
+        blue: '#2557d6',
+        indigo: '#6366f1',
+        teal: '#0d9488',
+        green: '#10b981',
+        amber: '#d97706',
+        orange: '#f59e0b',
+        red: '#dc2626',
+        slate: '#64748b',
+        purple: '#7c3aed',
     };
     const compact = (v) => {
         if (v === null || v === undefined) return '';
@@ -98,16 +131,36 @@ export const ChartTheme = (() => {
         if (a >= 1e3) return s + (a / 1e3).toFixed(0) + 'K';
         return s + a.toFixed(0);
     };
+    const gridColor = () => (isDarkTheme() ? 'rgba(148, 163, 184, 0.12)' : 'rgba(148, 163, 184, 0.22)');
     return {
         palette,
         compact,
-        moneyTicks: (ccy) => ({ ticks: { callback: v => `${ccy || ''} ${compact(v)}` }, grid: { color: '#eef2f7' } }),
-        pctTicks: () => ({ ticks: { callback: v => `${Number(v).toFixed(1)}%` }, grid: { color: '#eef2f7' } }),
-        grid: { color: '#eef2f7' },
+        moneyTicks: (ccy) => ({
+            ticks: { callback: v => `${ccy || ''} ${compact(v)}` },
+            grid: { color: gridColor(), drawBorder: false },
+            border: { display: false },
+        }),
+        pctTicks: () => ({
+            ticks: { callback: v => `${Number(v).toFixed(1)}%` },
+            grid: { color: gridColor(), drawBorder: false },
+            border: { display: false },
+        }),
+        grid: { color: 'rgba(148, 163, 184, 0.18)' },
         baseOptions: (extra = {}) => ({
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } } },
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8, padding: 14 } },
+                tooltip: {
+                    backgroundColor: '#0f172a',
+                    titleColor: '#f8fafc',
+                    bodyColor: '#e2e8f0',
+                    padding: 10,
+                    cornerRadius: 8,
+                    displayColors: true,
+                },
+            },
             ...extra,
         }),
     };

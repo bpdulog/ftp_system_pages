@@ -3,12 +3,13 @@ import { exportAlcoAnalyticsCsv, exportAlcoWorkbook } from '../exports.js';
 import { esc, showToast, mountChart, ChartTheme, getRunResults } from '../ui.js';
 
 export async function renderAnalytics(host, ctx) {
-    const { store, params, navigate } = ctx;
+    const { store, params, navigate, switchToDemo } = ctx;
     const state = store.state;
     const runs = state.calculation_runs.filter(r => r.run_type === 'ftp' && r.status === 'completed').sort((a, b) => b.id - a.id);
 
     if (!runs.length) {
-        host.innerHTML = `<div class="card"><div class="heading"><div><h2>FTP Analytics</h2><p>No completed FTP runs yet. Run an FTP calculation from the dashboard first.</p></div></div><div style="margin-top:1rem;"><a class="btn btn-primary" href="#/dashboard">Go to Dashboard</a></div></div>`;
+        host.innerHTML = `<div class="card empty-state"><div class="empty-icon"><i class="fas fa-chart-bar"></i></div><h2>FTP Analytics</h2><p>No completed FTP runs yet. Run an FTP calculation from the dashboard or load the Sample Bank.</p><div class="actions" style="justify-content:center;"><button class="btn demo-button" id="btnAnDemo" type="button"><i class="fas fa-university"></i> Load Sample Bank</button><a class="btn btn-primary" href="#/dashboard">Go to Dashboard</a></div></div>`;
+        document.getElementById('btnAnDemo')?.addEventListener('click', switchToDemo);
         return;
     }
 
