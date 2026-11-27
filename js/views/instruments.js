@@ -1,7 +1,9 @@
 import { Dec } from '../decimal.js';
 import {
     generateCashFlowsForInstrument, lockInstrumentFtp, todayIso,
-    getBucketForInstrument, calculateFtpRateWithBucket,
+    getBucketForInstrument, calculateFtpRateWithBucket, getCurveAsOf,
+    linearInterpolate, monthsToDays, isFloatingInstrument,
+    getEffectivePricingMonths, resolveFloatingContractRate, getEffectiveYieldCurve,
 } from '../engine.js';
 import {
     esc, fmtCurrency, fmtRatePct, fmtBpsFromDec, showToast,
@@ -12,6 +14,7 @@ export async function renderInstruments(host, ctx) {
     const { store, params, rerender, navigate, switchToDemo } = ctx;
     const state = store.state;
     const typeFilter = params.get('type') || '';
+    const rateTypeFilter = params.get('rate_type') || '';
     const search = (params.get('q') || '').trim().toLowerCase();
 
     if (state.instruments.length === 0) {
@@ -36,6 +39,7 @@ export async function renderInstruments(host, ctx) {
 
     const filtered = state.instruments.filter(i => {
         if (typeFilter && i.instrument_type !== typeFilter) return false;
+        if (rateTypeFilter && (i.rate_type || 'fixed') !== rateTypeFilter) return false;
         if (search && !i.name.toLowerCase().includes(search) && !(i.source_id || '').toLowerCase().includes(search)) return false;
         return true;
     });
@@ -43,7 +47,7 @@ export async function renderInstruments(host, ctx) {
     host.innerHTML = `
     <div class="card">
         <div class="heading">
-            <div><h2>Portfolio Instruments (${filtered.length})</h2><p>Loans and term deposits with contractual terms, bucket assignment, and latest FTP pricing.</p></div>
+            <div><h2>Portfolio Instruments (${filtered.length})</h2><p>Fixed and floating-rate loans and term deposits with contractual terms, reset schedules, bucket assignment, and latest FTP pricing.</p></div>
             <div class="actions">
                 <a class="btn btn-primary" href="#/instruments/new"><i class="fas fa-plus"></i> Add Instrument</a>
                 <a class="btn" href="#/import"><i class="fas fa-file-upload"></i> Import CSV / Excel</a>
@@ -56,6 +60,13 @@ export async function renderInstruments(host, ctx) {
                     <option value="">All types</option>
                     <option value="loan" ${typeFilter === 'loan' ? 'selected' : ''}>Loans</option>
                     <option value="deposit" ${typeFilter === 'deposit' ? 'selected' : ''}>Deposits</option>
+                </select>
+            </label>
+            <label>Rate Type
+                <select id="instRateTypeFilter">
+                    <option value="">All rate types</option>
+                    <option value="fixed" ${rateTypeFilter === 'fixed' ? 'selected' : ''}>Fixed</option>
+                    <option value="floating" ${rateTypeFilter === 'floating' ? 'selected' : ''}>Floating</option>
                 </select>
             </label>
             <button class="btn btn-primary" type="submit">Filter</button>
@@ -81,13 +92,20 @@ export async function renderInstruments(host, ctx) {
                     ${filtered.map(i => {
                         const r = latestResults.get(i.id);
                         const b = i.bucket_id ? bucketsById.get(i.bucket_id) : null;
+                        const floating = isFloatingInstrument(i);
+                        const pricingSub = floating
+                            ? `${esc(i.rate_index || 'SOFR')} ${i.index_spread_bps != null ? `${Number(i.index_spread_bps) >= 0 ? '+' : ''}${Math.round(Number(i.index_spread_bps))} bps` : ''} &middot; ${i.reset_frequency_months || 3}M reset`
+                            : 'Fixed';
                         return `
                         <tr>
                             <td><a href="#/instruments/${i.id}"><strong>${esc(i.name)}</strong></a>${i.source_id ? `<br><small class="muted">${esc(i.source_id)}</small>` : ''}</td>
-                            <td><span class="badge badge-${esc(i.instrument_type)}">${esc(i.instrument_type)}</span></td>
+                            <td>
+                                <span class="badge badge-${esc(i.instrument_type)}">${esc(i.instrument_type)}</span>
+                                ${floating ? `<span class="badge badge-warning">Float ${i.reset_frequency_months || 3}M</span>` : ''}
+                            </td>
                             <td>${esc(i.amortization_type)}</td>
                             <td class="num">${esc(fmtCurrency(i.principal, i.currency, 0))}</td>
-                            <td class="num">${esc(fmtRatePct(i.contract_rate, 2))}</td>
+                            <td class="num">${esc(fmtRatePct(i.contract_rate, 2))}<br><small class="muted">${pricingSub}</small></td>
                             <td class="num">${i.term_months} mo</td>
                             <td>${esc(i.origination_date)}</td>
                             <td>${esc(b ? b.name : 'Legacy Default')}</td>
@@ -108,9 +126,11 @@ export async function renderInstruments(host, ctx) {
         e.preventDefault();
         const q = document.getElementById('instSearch').value.trim();
         const t = document.getElementById('instTypeFilter').value;
+        const rt = document.getElementById('instRateTypeFilter').value;
         const qp = new URLSearchParams();
         if (q) qp.set('q', q);
         if (t) qp.set('type', t);
+        if (rt) qp.set('rate_type', rt);
         navigate(`/instruments${qp.toString() ? '?' + qp.toString() : ''}`);
     });
 
@@ -134,10 +154,12 @@ export async function renderInstrumentForm(host, ctx) {
     const activeBuckets = state.buckets.filter(b => b.active !== false);
     const dims = ['legal_entity', 'business_line', 'branch', 'product'];
     const groupsByDim = Object.fromEntries(dims.map(d => [d, state.reporting_groups.filter(g => g.dimension === d && g.active !== false)]));
+    const curveNames = [...new Set(state.yield_curves.map(c => c.name))];
+    if (!curveNames.includes('SOFR')) curveNames.unshift('SOFR');
 
     host.innerHTML = `
     <div class="card">
-        <div class="heading"><div><h2>Add New Instrument</h2><p>Create a loan or term deposit, assign a pricing bucket and reporting groups, and lock against the effective curve.</p></div></div>
+        <div class="heading"><div><h2>Add New Instrument</h2><p>Create a fixed or floating-rate loan or term deposit, preview live FTP pricing, and lock or reset against the effective curve.</p></div></div>
         <form id="newInstForm" style="margin-top:1rem;">
             <div class="form-grid">
                 <div class="field">
@@ -152,17 +174,46 @@ export async function renderInstrumentForm(host, ctx) {
                     </select>
                 </div>
                 <div class="field">
+                    <label for="fRateType">Rate Structure *</label>
+                    <select id="fRateType" required>
+                        <option value="fixed">Fixed Rate</option>
+                        <option value="floating">Floating Rate (Index + Spread)</option>
+                    </select>
+                </div>
+                <div class="field">
                     <label for="fPrincipal">Principal Amount *</label>
-                    <input type="number" id="fPrincipal" step="0.01" min="0.01" required placeholder="1000000">
+                    <input type="number" id="fPrincipal" step="0.01" min="0.01" required placeholder="1000000" value="1000000">
+                </div>
+                <div class="field" id="fIndexWrap" hidden>
+                    <label for="fRateIndex">Benchmark Index</label>
+                    <select id="fRateIndex">
+                        ${curveNames.map(c => `<option value="${esc(c)}" ${c === 'SOFR' ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+                    </select>
+                    <small>Floating loans reprice against this curve at each reset.</small>
+                </div>
+                <div class="field" id="fResetWrap" hidden>
+                    <label for="fResetFreq">Reset Frequency</label>
+                    <select id="fResetFreq">
+                        <option value="1">Monthly (1M / 30d)</option>
+                        <option value="3" selected>Quarterly (3M / 90d)</option>
+                        <option value="6">Semi-Annual (6M / 180d)</option>
+                        <option value="12">Annual (12M / 360d)</option>
+                    </select>
+                    <small>FTP base rate matches the reset tenor instead of full maturity.</small>
+                </div>
+                <div class="field" id="fIndexSpreadWrap" hidden>
+                    <label for="fIndexSpread">Customer Spread over Index (bps) *</label>
+                    <input type="number" id="fIndexSpread" step="1" min="-1000" max="5000" value="250" placeholder="250">
+                    <small>e.g., 250 bps = Index + 2.50%.</small>
                 </div>
                 <div class="field">
                     <label for="fRate">Contract Rate (%) *</label>
                     <input type="number" id="fRate" step="0.001" required placeholder="6.50">
-                    <small>Entered as percent (e.g., 6.50 for 6.50%)</small>
+                    <small id="fRateHint">Entered as percent (e.g., 6.50 for 6.50%)</small>
                 </div>
                 <div class="field">
                     <label for="fTerm">Term (Months) *</label>
-                    <input type="number" id="fTerm" min="1" step="1" required placeholder="60">
+                    <input type="number" id="fTerm" min="1" step="1" required placeholder="60" value="60">
                 </div>
                 <div class="field">
                     <label for="fAmort">Amortization Type</label>
@@ -179,7 +230,7 @@ export async function renderInstrumentForm(host, ctx) {
                 <div class="field">
                     <label for="fOrig">Origination Date *</label>
                     <input type="date" id="fOrig" value="${esc(todayIso())}" required>
-                    <small>Locks base rate to curve version effective on or before this date.</small>
+                    <small id="fOrigHint">Fixed loans lock base rate to the curve effective on or before this date.</small>
                 </div>
                 <div class="field">
                     <label for="fCpr">CPR Prepayment (%)</label>
@@ -202,6 +253,8 @@ export async function renderInstrumentForm(host, ctx) {
                 </div>
             </div>
 
+            <div class="card" id="instPricingPreview" style="background:var(--surface-2);margin:1rem 0;"></div>
+
             <div class="reporting-selection" style="margin:1rem 0;">
                 <h3>Reporting Groups (optional)</h3>
                 <div class="group-grid">
@@ -222,33 +275,152 @@ export async function renderInstrumentForm(host, ctx) {
         </form>
     </div>`;
 
-    document.getElementById('fType')?.addEventListener('change', (e) => {
+    const rateTypeEl = document.getElementById('fRateType');
+    const rateEl = document.getElementById('fRate');
+    const indexEl = document.getElementById('fRateIndex');
+    const resetEl = document.getElementById('fResetFreq');
+    const spreadEl = document.getElementById('fIndexSpread');
+    const termEl = document.getElementById('fTerm');
+    const origEl = document.getElementById('fOrig');
+    const typeEl = document.getElementById('fType');
+    const prinEl = document.getElementById('fPrincipal');
+    const bucketEl = document.getElementById('fBucket');
+    const ovEl = document.getElementById('fSpreadOverride');
+    const ccyEl = document.getElementById('fCurrency');
+    const previewEl = document.getElementById('instPricingPreview');
+
+    const updateFloatingUiAndPreview = () => {
+        const isFloat = rateTypeEl.value === 'floating';
+        document.getElementById('fIndexWrap').hidden = !isFloat;
+        document.getElementById('fResetWrap').hidden = !isFloat;
+        document.getElementById('fIndexSpreadWrap').hidden = !isFloat;
+        document.getElementById('fOrigHint').textContent = isFloat
+            ? 'Floating loans reset to the active curve as of the valuation date.'
+            : 'Fixed loans lock base rate to the curve effective on or before this date.';
+
+        const kind = typeEl.value;
+        const term = parseInt(termEl.value, 10);
+        const resetM = parseInt(resetEl.value, 10) || 3;
+        const idxName = indexEl.value || 'SOFR';
+        const hasIndexCurve = state.yield_curves.some(c => c.name === idxName);
+
+        let bucket = null;
+        try {
+            bucket = getBucketForInstrument(state, {
+                instrument_type: kind,
+                bucket_id: bucketEl.value ? Number(bucketEl.value) : null,
+            });
+        } catch { bucket = null; }
+
+        let idxRate = null;
+        if (isFloat && hasIndexCurve && Number.isInteger(term) && term > 0) {
+            try {
+                const idxCurve = getCurveAsOf(state, idxName, todayIso());
+                const pricingM = Math.min(term, resetM);
+                idxRate = linearInterpolate(monthsToDays(pricingM), idxCurve.points);
+                const spBps = spreadEl.value.trim() !== '' ? Dec.from(spreadEl.value) : Dec.from(0);
+                const effRate = idxRate.add(spBps.div(10000));
+                rateEl.value = (effRate.toNumber() * 100).toFixed(3);
+                document.getElementById('fRateHint').textContent = `Auto-calculated: ${idxName} (${(idxRate.toNumber() * 100).toFixed(3)}%) + ${spBps.toFixed(0)} bps`;
+            } catch {
+                document.getElementById('fRateHint').textContent = 'Entered as percent (e.g., 6.50 for 6.50%)';
+            }
+        } else if (isFloat) {
+            document.getElementById('fRateHint').textContent = `No ${idxName} curve loaded yet — enter current effective rate (%)`;
+        } else {
+            document.getElementById('fRateHint').textContent = 'Entered as percent (e.g., 6.50 for 6.50%)';
+        }
+
+        // Live FTP pricing preview
+        try {
+            if (!Number.isInteger(term) || term <= 0) {
+                previewEl.innerHTML = '<p class="muted">Enter a valid term to preview FTP pricing.</p>';
+                return;
+            }
+            const pricingM = isFloat ? Math.min(term, resetM) : term;
+            const lookupDate = isFloat ? todayIso() : (origEl.value || todayIso());
+            const defaultCurveName = state.yield_curves.some(c => c.name === idxName) ? idxName : (state.yield_curves[0]?.name || 'SOFR');
+            const fallbackCurve = state.yield_curves.some(c => c.name === defaultCurveName)
+                ? getCurveAsOf(state, defaultCurveName, lookupDate)
+                : null;
+            const effCurve = bucket ? getEffectiveYieldCurve(state, bucket, fallbackCurve) : fallbackCurve;
+
+            let baseRate = null;
+            if (bucket && bucket.methodology === 'pooled') {
+                baseRate = Dec.from(bucket.parameters.pool_rate);
+            } else if (effCurve) {
+                baseRate = linearInterpolate(monthsToDays(pricingM), effCurve.points);
+            }
+
+            if (!baseRate) {
+                previewEl.innerHTML = `<p class="muted">Live FTP preview requires a yield curve (publish or import SOFR on the <a href="#/curves">Curves</a> page, or load Sample Bank).</p>`;
+                return;
+            }
+
+            const ovRaw = ovEl.value.trim();
+            const ovDec = ovRaw !== '' ? Dec.from(ovRaw).div(10000).round(6).toFixed(6) : null;
+            const [ftpSpread, ftpRate] = bucket
+                ? calculateFtpRateWithBucket(baseRate, bucket, kind, ovDec)
+                : [Dec.from(kind === 'loan' ? 20 : -5).div(10000), baseRate.add(Dec.from(kind === 'loan' ? 20 : -5).div(10000))];
+
+            const cRatePct = parseFloat(rateEl.value);
+            const hasRate = Number.isFinite(cRatePct);
+            const cRate = hasRate ? Dec.from(cRatePct).div(100) : null;
+            const prin = Dec.from(prinEl.value || '0');
+            const spreadOverFtp = cRate ? (kind === 'loan' ? cRate.sub(ftpRate) : ftpRate.sub(cRate)) : null;
+            const contrib = spreadOverFtp ? prin.mul(spreadOverFtp).round(2) : null;
+            const ccy = (ccyEl.value || 'USD').trim().toUpperCase();
+
+            previewEl.innerHTML = `
+                <h2 style="margin-bottom:.6rem;">Live FTP Pricing Preview <span class="badge ${isFloat ? 'badge-warning' : 'badge-neutral'}">${isFloat ? `Floating (${pricingM}M / ${pricingM * 30}d reset)` : `Fixed (${term}M / ${term * 30}d)`}</span></h2>
+                <div class="metrics-grid" style="margin-bottom:0;">
+                    <div class="metric-card"><div class="metric-label">Customer Rate</div><div class="metric-value">${cRate ? esc(fmtRatePct(cRate.toFixed(6), 3)) : '&mdash;'}</div></div>
+                    <div class="metric-card"><div class="metric-label">Base Curve (${pricingM * 30}d)</div><div class="metric-value">${esc(fmtRatePct(baseRate.toFixed(6), 3))}</div></div>
+                    <div class="metric-card"><div class="metric-label">FTP Rate (${fmtBpsFromDec(ftpSpread.toFixed(6))})</div><div class="metric-value">${esc(fmtRatePct(ftpRate.toFixed(6), 3))}</div></div>
+                    <div class="metric-card ${contrib && contrib.lt(0) ? 'negative' : 'positive'}"><div class="metric-label">Est. Margin / NIM</div><div class="metric-value">${spreadOverFtp ? esc(fmtBpsFromDec(spreadOverFtp.toFixed(6))) : '&mdash;'}</div><div class="metric-sub">${contrib ? `${esc(fmtCurrency(contrib.toNumber(), ccy, 2))} / yr` : ''}</div></div>
+                </div>`;
+        } catch (err) {
+            previewEl.innerHTML = `<p class="muted">${esc(err.message)}</p>`;
+        }
+    };
+
+    typeEl?.addEventListener('change', (e) => {
         if (e.target.value === 'deposit') document.getElementById('fAmort').value = 'bullet';
+        updateFloatingUiAndPreview();
     });
+    [rateTypeEl, indexEl, resetEl, bucketEl].forEach(el => el?.addEventListener('change', updateFloatingUiAndPreview));
+    [spreadEl, rateEl, termEl, origEl, prinEl, ovEl, ccyEl].forEach(el => el?.addEventListener('input', updateFloatingUiAndPreview));
+    updateFloatingUiAndPreview();
 
     document.getElementById('newInstForm')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         try {
-            const ccy = document.getElementById('fCurrency').value.trim().toUpperCase();
+            const ccy = ccyEl.value.trim().toUpperCase();
             if (!/^[A-Z]{3}$/.test(ccy)) throw new Error('Currency must be a 3-letter ISO code.');
-            const rateDec = Dec.from(document.getElementById('fRate').value).div(100).round(6).toFixed(6);
-            const prinDec = Dec.from(document.getElementById('fPrincipal').value).round(4).toFixed(4);
-            const term = parseInt(document.getElementById('fTerm').value, 10);
-            const ovRaw = document.getElementById('fSpreadOverride').value.trim();
+            const isFloat = rateTypeEl.value === 'floating';
+            const rateDec = Dec.from(rateEl.value).div(100).round(6).toFixed(6);
+            const prinDec = Dec.from(prinEl.value).round(4).toFixed(4);
+            const term = parseInt(termEl.value, 10);
+            const ovRaw = ovEl.value.trim();
             const ovDec = ovRaw !== '' ? Dec.from(ovRaw).div(10000).round(6).toFixed(6) : null;
-            const bucketRaw = document.getElementById('fBucket').value;
+            const bucketRaw = bucketEl.value;
+            const idxSpreadRaw = spreadEl.value.trim();
 
             const inst = {
                 id: store.nextId('instruments'),
                 name: document.getElementById('fName').value.trim(),
-                instrument_type: document.getElementById('fType').value,
+                instrument_type: typeEl.value,
+                rate_type: isFloat ? 'floating' : 'fixed',
+                rate_index: isFloat ? (indexEl.value || 'SOFR') : null,
+                reset_frequency_months: isFloat ? Number(resetEl.value || 3) : null,
+                index_spread_bps: isFloat && idxSpreadRaw !== '' ? Dec.from(idxSpreadRaw).round(2).toFixed(2) : null,
                 amortization_type: document.getElementById('fAmort').value,
                 principal: prinDec,
                 contract_rate: rateDec,
                 term_months: term,
                 currency: ccy,
                 cpr_percent: Dec.from(document.getElementById('fCpr').value || '0').round(2).toFixed(2),
-                origination_date: document.getElementById('fOrig').value || todayIso(),
+                origination_date: origEl.value || todayIso(),
                 source_system: 'manual-ui',
                 source_id: document.getElementById('fSourceId').value.trim() || null,
                 import_batch_id: null,
@@ -263,8 +435,11 @@ export async function renderInstrumentForm(host, ctx) {
                 created_at: new Date().toISOString(),
             };
 
-            if (state.yield_curves.some(c => c.name === 'SOFR')) {
-                lockInstrumentFtp(state, inst, 'SOFR');
+            const curveTarget = (isFloat && state.yield_curves.some(c => c.name === inst.rate_index))
+                ? inst.rate_index
+                : (state.yield_curves.some(c => c.name === 'SOFR') ? 'SOFR' : state.yield_curves[0]?.name);
+            if (curveTarget) {
+                lockInstrumentFtp(state, inst, curveTarget);
             }
             state.instruments.push(inst);
 
@@ -306,6 +481,11 @@ export async function renderInstrumentDetail(host, ctx, id) {
     const memberships = state.group_memberships.filter(m => m.instrument_id === inst.id);
     const dims = ['legal_entity', 'business_line', 'branch', 'product'];
 
+    const floating = isFloatingInstrument(inst);
+    const pricingMonths = getEffectivePricingMonths(inst);
+    const curveNames = [...new Set(state.yield_curves.map(c => c.name))];
+    if (!curveNames.includes('SOFR')) curveNames.unshift('SOFR');
+
     let previewFtpRate = latestRes ? latestRes.ftp_rate : inst.locked_ftp_rate;
     if (!previewFtpRate && inst.locked_base_rate) {
         const [, r] = calculateFtpRateWithBucket(inst.locked_base_rate, bucket, inst.instrument_type, inst.ftp_spread_override);
@@ -316,8 +496,8 @@ export async function renderInstrumentDetail(host, ctx, id) {
     <div class="card">
         <div class="heading">
             <div>
-                <h2>${esc(inst.name)} <span class="badge badge-${esc(inst.instrument_type)}">${esc(inst.instrument_type)}</span></h2>
-                <p>Originated ${esc(inst.origination_date)} &middot; ${inst.term_months} months (${inst.term_months * 30} days) &middot; ${esc(inst.amortization_type)}</p>
+                <h2>${esc(inst.name)} <span class="badge badge-${esc(inst.instrument_type)}">${esc(inst.instrument_type)}</span>${floating ? ` <span class="badge badge-warning">Float ${inst.reset_frequency_months || 3}M</span>` : ''}</h2>
+                <p>Originated ${esc(inst.origination_date)} &middot; ${inst.term_months} months (${inst.term_months * 30} days) &middot; ${esc(inst.amortization_type)}${floating ? ` &middot; ${esc(inst.rate_index || 'SOFR')} ${inst.index_spread_bps != null ? `${Number(inst.index_spread_bps) >= 0 ? '+' : ''}${Math.round(Number(inst.index_spread_bps))} bps` : ''} (priced at ${pricingMonths * 30}d reset)` : ' &middot; Fixed'}</p>
             </div>
             <div class="actions">
                 <button class="btn btn-primary" id="btnGenCf" type="button"><i class="fas fa-calendar-alt"></i> Generate Cash Flows</button>
@@ -327,22 +507,45 @@ export async function renderInstrumentDetail(host, ctx, id) {
         </div>
         <div class="metrics-grid" style="margin-top:1rem;">
             <div class="metric-card"><div class="metric-label">Principal</div><div class="metric-value">${esc(fmtCurrency(inst.principal, inst.currency, 2))}</div></div>
-            <div class="metric-card"><div class="metric-label">Contract Rate</div><div class="metric-value">${esc(fmtRatePct(inst.contract_rate, 3))}</div></div>
-            <div class="metric-card"><div class="metric-label">Locked Base Rate</div><div class="metric-value">${inst.locked_base_rate ? esc(fmtRatePct(inst.locked_base_rate, 3)) : '&mdash;'}</div></div>
+            <div class="metric-card"><div class="metric-label">${floating ? 'Current Reset Rate' : 'Contract Rate'}</div><div class="metric-value">${esc(fmtRatePct(inst.contract_rate, 3))}</div></div>
+            <div class="metric-card"><div class="metric-label">${floating ? `Base Rate (${pricingMonths * 30}d Reset)` : 'Locked Base Rate'}</div><div class="metric-value">${inst.locked_base_rate ? esc(fmtRatePct(inst.locked_base_rate, 3)) : '&mdash;'}</div></div>
             <div class="metric-card"><div class="metric-label">Effective FTP Rate</div><div class="metric-value">${previewFtpRate ? esc(fmtRatePct(previewFtpRate, 3)) : '&mdash;'}</div></div>
         </div>
         <p class="small-note">
-            <strong>Rate-lock provenance:</strong>
-            ${lockedCurve ? `Locked to curve <strong>${esc(lockedCurve.name)}</strong> (effective ${esc(lockedCurve.effective_date)})` : 'Not locked yet (run FTP calculation or generate cash flows).'}
+            <strong>${floating ? 'Reset provenance:' : 'Rate-lock provenance:'}</strong>
+            ${lockedCurve ? `${floating ? 'Resets to' : 'Locked to'} curve <strong>${esc(lockedCurve.name)}</strong> (effective ${esc(lockedCurve.effective_date)})` : 'Not priced yet (run FTP calculation or generate cash flows).'}
             &middot; <strong>Bucket:</strong> ${esc(bucket.name)} (${esc(bucket.methodology)})
         </p>
     </div>
 
     <div class="grid-2" style="margin-bottom:1.5rem;">
         <div class="card">
-            <h2>Overrides &amp; Bucket Assignment</h2>
+            <h2>Pricing Structure &amp; Overrides</h2>
             <form id="instEditForm">
                 <div class="form-grid">
+                    <div class="field">
+                        <label>Rate Structure</label>
+                        <select id="editRateType">
+                            <option value="fixed" ${!floating ? 'selected' : ''}>Fixed Rate</option>
+                            <option value="floating" ${floating ? 'selected' : ''}>Floating Rate (Index + Spread)</option>
+                        </select>
+                    </div>
+                    <div class="field" id="editIndexWrap" ${!floating ? 'hidden' : ''}>
+                        <label>Benchmark Index</label>
+                        <select id="editRateIndex">
+                            ${curveNames.map(c => `<option value="${esc(c)}" ${(inst.rate_index || 'SOFR') === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="field" id="editResetWrap" ${!floating ? 'hidden' : ''}>
+                        <label>Reset Frequency</label>
+                        <select id="editResetFreq">
+                            ${[1, 3, 6, 12].map(m => `<option value="${m}" ${Number(inst.reset_frequency_months || 3) === m ? 'selected' : ''}>${m}M (${m * 30}d)</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="field" id="editSpreadWrap" ${!floating ? 'hidden' : ''}>
+                        <label>Index Spread (bps)</label>
+                        <input type="number" step="1" id="editIndexSpread" value="${inst.index_spread_bps != null ? esc(inst.index_spread_bps) : ''}" placeholder="e.g., 250">
+                    </div>
                     <div class="field">
                         <label>Pricing Bucket</label>
                         <select id="editBucket">
@@ -359,7 +562,7 @@ export async function renderInstrumentDetail(host, ctx, id) {
                         <input type="number" step="0.1" min="0" max="100" id="editCprOv" value="${inst.cpr_percent_override != null ? inst.cpr_percent_override : ''}" placeholder="Blank = ${esc(inst.cpr_percent || 0)}%">
                     </div>
                 </div>
-                <button class="btn btn-primary" type="submit">Save Overrides</button>
+                <button class="btn btn-primary" type="submit">Save Pricing &amp; Overrides</button>
             </form>
         </div>
         <div class="card">
@@ -442,17 +645,43 @@ export async function renderInstrumentDetail(host, ctx, id) {
         navigate('/instruments');
     });
 
+    const editRateTypeEl = document.getElementById('editRateType');
+    editRateTypeEl?.addEventListener('change', () => {
+        const isFl = editRateTypeEl.value === 'floating';
+        document.getElementById('editIndexWrap').hidden = !isFl;
+        document.getElementById('editResetWrap').hidden = !isFl;
+        document.getElementById('editSpreadWrap').hidden = !isFl;
+    });
+
     document.getElementById('instEditForm')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         try {
+            const isFl = editRateTypeEl.value === 'floating';
+            inst.rate_type = isFl ? 'floating' : 'fixed';
+            if (isFl) {
+                inst.rate_index = document.getElementById('editRateIndex').value || 'SOFR';
+                inst.reset_frequency_months = Number(document.getElementById('editResetFreq').value || 3);
+                const idxSp = document.getElementById('editIndexSpread').value.trim();
+                inst.index_spread_bps = idxSp !== '' ? Dec.from(idxSp).round(2).toFixed(2) : null;
+            } else {
+                inst.rate_index = null;
+                inst.reset_frequency_months = null;
+                inst.index_spread_bps = null;
+            }
             const bVal = document.getElementById('editBucket').value;
             inst.bucket_id = bVal ? Number(bVal) : null;
             const spVal = document.getElementById('editSpreadOv').value.trim();
             inst.ftp_spread_override = spVal !== '' ? Dec.from(spVal).div(10000).round(6).toFixed(6) : null;
             const cprVal = document.getElementById('editCprOv').value.trim();
             inst.cpr_percent_override = cprVal !== '' ? Dec.from(cprVal).round(2).toFixed(2) : null;
+
+            const curveTarget = (isFl && state.yield_curves.some(c => c.name === inst.rate_index))
+                ? inst.rate_index
+                : (state.yield_curves.some(c => c.name === 'SOFR') ? 'SOFR' : state.yield_curves[0]?.name);
+            if (curveTarget) lockInstrumentFtp(state, inst, curveTarget);
+
             await store.save();
-            showToast('Overrides saved. Re-run FTP calculation to refresh run snapshots.', 'success');
+            showToast('Pricing & overrides saved. Re-run FTP calculation to refresh run snapshots.', 'success');
             await rerender();
         } catch (err) {
             showToast(err.message, 'error');

@@ -65,10 +65,11 @@ export async function renderImport(host, ctx) {
 
     document.getElementById('btnDlTemplate')?.addEventListener('click', () => {
         downloadCsv('ftp_import_template.csv',
-            ['source_id', 'name', 'instrument_type', 'amortization_type', 'principal', 'rate', 'term_months', 'currency', 'cpr_percent', 'start_date'],
+            ['source_id', 'name', 'instrument_type', 'amortization_type', 'rate_type', 'rate_index', 'reset_frequency_months', 'index_spread_bps', 'principal', 'rate', 'term_months', 'currency', 'cpr_percent', 'start_date'],
             [
-                ['LN-101', 'Sample Commercial Loan', 'loan', 'amortizing', '1500000', '6.75%', '60', 'USD', '1.5', '2026-01-15'],
-                ['CD-201', 'Sample 24M Term Deposit', 'deposit', 'bullet', '750000', '0.0410', '24', 'USD', '0', '2026-01-15'],
+                ['LN-101', 'Sample Fixed Commercial Loan', 'loan', 'amortizing', 'fixed', '', '', '', '1500000', '6.75%', '60', 'USD', '1.5', '2026-01-15'],
+                ['LN-102', 'Sample Floating Revolver', 'loan', 'bullet', 'floating', 'SOFR', '3', '250', '2000000', '7.55%', '36', 'USD', '0', '2026-01-15'],
+                ['CD-201', 'Sample 24M Term Deposit', 'deposit', 'bullet', 'fixed', '', '', '', '750000', '0.0410', '24', 'USD', '0', '2026-01-15'],
             ]);
     });
 
@@ -165,10 +166,10 @@ export async function renderImport(host, ctx) {
             <div class="notice notice-success">All ${validRecords.length} rows validated successfully and are ready to import.</div>
             <div class="table-wrap">
                 <table class="compact">
-                    <thead><tr><th>Name</th><th>Type</th><th>Amort.</th><th class="num">Principal</th><th class="num">Rate</th><th class="num">Term</th><th>Currency</th><th>Origination</th></tr></thead>
+                    <thead><tr><th>Name</th><th>Type</th><th>Pricing</th><th>Amort.</th><th class="num">Principal</th><th class="num">Rate</th><th class="num">Term</th><th>Currency</th><th>Origination</th></tr></thead>
                     <tbody>
                         ${validRecords.slice(0, 10).map(r => `<tr>
-                            <td>${esc(r.name)}</td><td>${esc(r.instrument_type)}</td><td>${esc(r.amortization_type)}</td>
+                            <td>${esc(r.name)}</td><td>${esc(r.instrument_type)}</td><td>${r.rate_type === 'floating' ? `${esc(r.rate_index || 'SOFR')} +${esc(r.index_spread_bps ?? 0)} bps (${r.reset_frequency_months || 3}M)` : 'Fixed'}</td><td>${esc(r.amortization_type)}</td>
                             <td class="num">${esc(r.principal)}</td><td class="num">${esc(r.contract_rate)}</td>
                             <td class="num">${r.term_months} mo</td><td>${esc(r.currency)}</td><td>${esc(r.origination_date || todayIso())}</td>
                         </tr>`).join('')}
@@ -227,6 +228,10 @@ export async function renderImport(host, ctx) {
                         amortization_type: rec.amortization_type,
                         principal: rec.principal,
                         contract_rate: rec.contract_rate,
+                        rate_type: rec.rate_type || 'fixed',
+                        rate_index: rec.rate_index || null,
+                        reset_frequency_months: rec.reset_frequency_months ?? null,
+                        index_spread_bps: rec.index_spread_bps ?? null,
                         term_months: rec.term_months,
                         currency: rec.currency,
                         cpr_percent: rec.cpr_percent,

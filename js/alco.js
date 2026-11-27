@@ -140,6 +140,10 @@ export function buildFacts(results, snapshot, currency) {
             ftp_amount: dec(result.ftp_cost_revenue),
             contribution: dec(result.net_interest_margin),
             term_months: Number(inst.term_months || 0),
+            rate_type: String(inst.rate_type || 'fixed').toLowerCase(),
+            rate_index: inst.rate_index || null,
+            reset_frequency_months: inst.reset_frequency_months != null ? Number(inst.reset_frequency_months) : null,
+            index_spread_bps: inst.index_spread_bps ?? null,
             bucket: bucket.name || 'Unassigned',
             methodology: String(bucket.methodology || 'matched_maturity'),
             fallback_bucket: fallback,
@@ -257,15 +261,26 @@ function ladderSection(facts) {
     return { rows, one_year_gap: oneYear, one_year_gap_to_assets: ratio(oneYear, totalAssets) };
 }
 
+function effectiveRepricingMonths(f) {
+    if (f.rate_type === 'floating') {
+        const reset = f.reset_frequency_months && f.reset_frequency_months > 0 ? f.reset_frequency_months : 1;
+        return Math.min(f.term_months || reset, reset);
+    }
+    return f.term_months;
+}
+
 function sensitivitySection(facts, baseNetInterest) {
     const curveLinked = facts.filter(f => f.methodology !== 'pooled');
-    const repricing = facts.filter(f => f.term_months > 0 && f.term_months <= 12);
+    const repricing = facts.filter(f => {
+        const m = effectiveRepricingMonths(f);
+        return m > 0 && m <= 12;
+    });
     const rows = SHOCKS_BPS.map(shock => {
         const move = Dec.from(shock).mul(ONE_BP);
-        const loanDelta = sumDec(curveLinked.filter(f => f.type === 'loan'), f => f.balance.mul(move)).neg();
-        const depDelta = sumDec(curveLinked.filter(f => f.type === 'deposit'), f => f.balance.mul(move));
+        const loanDelta = sumDec(curveLinked.filter(f => f.type === 'loan' && f.rate_type !== 'floating'), f => f.balance.mul(move)).neg();
+        const depDelta = sumDec(curveLinked.filter(f => f.type === 'deposit' && f.rate_type !== 'floating'), f => f.balance.mul(move));
         const niiDelta = sumDec(repricing, f =>
-            Dec.from(f.sign).mul(f.balance).mul(move).mul(12 - f.term_months).div(12)
+            Dec.from(f.sign).mul(f.balance).mul(move).mul(12 - effectiveRepricingMonths(f)).div(12)
         );
         return {
             shock_bps: shock,

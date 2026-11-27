@@ -41,8 +41,8 @@ export function exportPortfolioCsv(state) {
     }
     const bucketsById = new Map(state.buckets.map(b => [b.id, b]));
     const headers = [
-        'ID', 'Source System', 'Source ID', 'Name', 'Type', 'Amortization', 'Currency',
-        'Principal', 'Contract Rate', 'Term (Months)', 'Origination Date', 'CPR (%)',
+        'ID', 'Source System', 'Source ID', 'Name', 'Type', 'Rate Type', 'Rate Index', 'Reset (Months)', 'Index Spread (bps)',
+        'Amortization', 'Currency', 'Principal', 'Contract Rate', 'Term (Months)', 'Origination Date', 'CPR (%)',
         'Bucket', 'Base Rate', 'FTP Spread', 'FTP Rate', 'Interest Income/Expense',
         'FTP Cost/Revenue', 'Annualized Margin Contribution',
     ];
@@ -51,7 +51,8 @@ export function exportPortfolioCsv(state) {
         const b = inst.bucket_id ? bucketsById.get(inst.bucket_id) : null;
         return [
             inst.id, inst.source_system || '', inst.source_id || '', inst.name,
-            inst.instrument_type, inst.amortization_type, inst.currency,
+            inst.instrument_type, inst.rate_type || 'fixed', inst.rate_index || '', inst.reset_frequency_months ?? '', inst.index_spread_bps ?? '',
+            inst.amortization_type, inst.currency,
             inst.principal, inst.contract_rate, inst.term_months, inst.origination_date,
             inst.cpr_percent ?? 0, b ? b.name : 'Default',
             r ? r.base_rate : '', r ? r.ftp_spread : '', r ? r.ftp_rate : '',
@@ -67,7 +68,7 @@ export function exportRunCsv(run, results, currency = null) {
     const insts = new Map((run.input_snapshot?.instruments || []).map(i => [Number(i.id), i]));
     const buckets = new Map((run.input_snapshot?.buckets || []).map(b => [Number(b.id), b]));
     const headers = [
-        'Run ID', 'As-of Date', 'Instrument ID', 'Source ID', 'Name', 'Type', 'Currency',
+        'Run ID', 'As-of Date', 'Instrument ID', 'Source ID', 'Name', 'Type', 'Rate Type', 'Reset (Months)', 'Currency',
         'Bucket', 'Principal', 'Contract Rate', 'Term (Months)', 'Base Rate',
         'FTP Spread', 'FTP Rate', 'Interest', 'FTP Cost/Revenue', 'Annualized Contribution',
     ];
@@ -80,6 +81,7 @@ export function exportRunCsv(run, results, currency = null) {
         const b = inst.bucket_id ? buckets.get(Number(inst.bucket_id)) : null;
         rows.push([
             run.id, run.as_of_date, inst.id, inst.source_id || '', inst.name, inst.instrument_type,
+            inst.rate_type || 'fixed', inst.reset_frequency_months ?? '',
             iccy, b ? b.name : 'Legacy Default', inst.principal, inst.contract_rate,
             inst.term_months, r.base_rate, r.ftp_spread, r.ftp_rate,
             r.interest_income_expense, r.ftp_cost_revenue, r.net_interest_margin,
@@ -142,7 +144,8 @@ export function exportPortfolioExcel(state) {
     }
     const bucketsById = new Map(state.buckets.map(b => [b.id, b]));
     const aoa = [[
-        'ID', 'Source ID', 'Name', 'Type', 'Amortization', 'Currency',
+        'ID', 'Source ID', 'Name', 'Type', 'Rate Type', 'Rate Index', 'Reset (Months)', 'Index Spread (bps)',
+        'Amortization', 'Currency',
         'Principal', 'Contract Rate', 'Term (Months)', 'Origination Date',
         'Bucket', 'Base Rate', 'FTP Spread', 'FTP Rate', 'Interest', 'FTP Cost/Rev', 'Annualized Contribution',
     ]];
@@ -151,7 +154,9 @@ export function exportPortfolioExcel(state) {
         const b = inst.bucket_id ? bucketsById.get(inst.bucket_id) : null;
         aoa.push([
             inst.id, safeSpreadsheetCell(inst.source_id || ''), safeSpreadsheetCell(inst.name),
-            inst.instrument_type, inst.amortization_type, inst.currency,
+            inst.instrument_type, inst.rate_type || 'fixed', inst.rate_index || '',
+            inst.reset_frequency_months ?? null, inst.index_spread_bps != null ? Number(inst.index_spread_bps) : null,
+            inst.amortization_type, inst.currency,
             Number(inst.principal), Number(inst.contract_rate), Number(inst.term_months),
             inst.origination_date, safeSpreadsheetCell(b ? b.name : 'Legacy Default'),
             r ? Number(r.base_rate) : null, r ? Number(r.ftp_spread) : null, r ? Number(r.ftp_rate) : null,
@@ -161,7 +166,7 @@ export function exportPortfolioExcel(state) {
     }
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [8, 16, 28, 10, 14, 10, 16, 12, 12, 14, 22, 12, 12, 12, 16, 16, 20].map(wch => ({ wch }));
+    ws['!cols'] = [8, 16, 28, 10, 12, 12, 14, 16, 14, 10, 16, 12, 12, 14, 22, 12, 12, 12, 16, 16, 20].map(wch => ({ wch }));
     XLSX.utils.book_append_sheet(wb, ws, 'Portfolio FTP');
     XLSX.writeFile(wb, 'ftp_portfolio_export.xlsx');
 }
@@ -189,7 +194,7 @@ export function exportAlcoWorkbook(pack) {
     };
 
     const bs = pack.balance_sheet, c = pack.contribution, l = pack.ladder;
-    addSheet('Summary', 'ALCO FTP PACK - DRAFT', [
+    addSheet('Summary', 'OPEN ALCO PACK - DRAFT', [
         {
             headers: ['Item', 'Value'],
             rows: [
@@ -369,7 +374,7 @@ export async function exportAlcoDeck(pack, audience = 'alco') {
     {
         const s = pptx.addSlide();
         s.background = { color: NAVY };
-        const heading = audience === 'alco' ? 'ASSET/LIABILITY COMMITTEE' : 'BOARD OF DIRECTORS';
+        const heading = audience === 'alco' ? 'OPEN ALCO · ASSET/LIABILITY COMMITTEE' : 'OPEN ALCO · BOARD OF DIRECTORS';
         s.addText(heading, { x: 0.9, y: 2.0, w: 11, h: 0.5, fontSize: 16, bold: true, color: '9FC5E8' });
         s.addText('Funds Transfer Pricing and Balance Sheet Review', { x: 0.9, y: 2.6, w: 11.5, h: 1.1, fontSize: 38, bold: true, color: 'FFFFFF' });
         const cmpTxt = meta.compare_run_id ? ` | Compared with run #${meta.compare_run_id} (${meta.compare_as_of_date})` : '';
@@ -506,7 +511,7 @@ export function openPrintableReport(pack, audience = 'alco') {
     const c = pack.contribution;
     const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const html = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>${audience.toUpperCase()} Report — Run #${meta.run_id}</title>
+<html lang="en"><head><meta charset="UTF-8"><title>Open ALCO — ${audience.toUpperCase()} Report · Run #${meta.run_id}</title>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#0f172a;margin:2rem;line-height:1.45}
 h1,h2{color:#1d3557} .banner{background:#fef3c7;color:#92400e;padding:.6rem 1rem;border-radius:6px;font-weight:700;margin-bottom:1rem}
@@ -516,7 +521,7 @@ th,td{border:1px solid #cbd5e1;padding:.45rem .6rem;text-align:left} th{backgrou
 </style></head><body>
 <div class="no-print" style="margin-bottom:1rem"><button onclick="window.print()" style="padding:.5rem 1rem;cursor:pointer">Print / Save as PDF</button></div>
 <div class="banner">DRAFT — ${esc(audience.toUpperCase())} Report | Run #${meta.run_id} | As of ${esc(meta.as_of_date)} | ${esc(ccy)} | Coverage ${pack.coverage.reported}/${pack.coverage.expected}</div>
-<h1>Funds Transfer Pricing — ${esc(audience.toUpperCase())} Report</h1>
+<h1>Open ALCO — ${esc(audience.toUpperCase())} Report</h1>
 <p>Prepared by ${esc(meta.prepared_by)} | Methodology ${esc(meta.methodology_version)}</p>
 <h2>Key Observations</h2><ul>${pack.observations.map(n => `<li>${esc(n)}</li>`).join('')}</ul>
 <h2>Contribution &amp; Treasury Reconciliation</h2>

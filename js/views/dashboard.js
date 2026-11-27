@@ -48,7 +48,7 @@ export async function renderDashboard(host, ctx) {
     if (state.instruments.length === 0) {
         host.innerHTML = `
         <section class="hero-panel">
-            <span class="hero-eyebrow"><i class="fas fa-sparkles"></i> Institutional Treasury &amp; ALM Platform</span>
+            <span class="hero-eyebrow"><i class="fas fa-sparkles"></i> Open ALCO &middot; Institutional Treasury &amp; ALM</span>
             <h2>Matched-Maturity Funds Transfer Pricing, Built for Speed &amp; Auditability</h2>
             <p>Price commercial loans and term deposits against versioned SOFR &amp; Treasury curves, run repricing gap and regulatory stress tests, and export board-ready Excel &amp; PowerPoint ALCO packs directly in your browser.</p>
             <div class="hero-grid">
@@ -176,7 +176,7 @@ export async function renderDashboard(host, ctx) {
                     ${scopedRows.slice(0, 25).map(({ inst, r }) => `
                     <tr>
                         <td><a href="#/instruments/${inst.id}"><strong>${esc(inst.name)}</strong></a></td>
-                        <td><span class="badge badge-${esc(inst.instrument_type)}">${esc(inst.instrument_type)}</span></td>
+                        <td><span class="badge badge-${esc(inst.instrument_type)}">${esc(inst.instrument_type)}</span>${String(inst.rate_type || 'fixed') === 'floating' ? ` <span class="badge badge-warning">Float ${inst.reset_frequency_months || 3}M</span>` : ''}</td>
                         <td class="num">${esc(fmtCurrency(inst.principal, inst.currency, 0))}</td>
                         <td class="num">${esc(fmtRatePct(inst.contract_rate, 2))}</td>
                         <td class="num">${esc(fmtRatePct(r.base_rate, 3))}</td>

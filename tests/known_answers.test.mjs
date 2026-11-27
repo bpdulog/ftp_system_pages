@@ -215,3 +215,72 @@ test('CSV importer normalizes rates, principals, terms, and dates', () => {
     assert.equal(records[0].term_months, 36);
     assert.equal(records[0].origination_date, '2026-02-01');
 });
+
+test('floating-rate loan prices at reset tenor, updates on curve reset, and maps to reset bucket', () => {
+    const { store, curve } = setupStore(CURVE_POINTS, '2026-01-01');
+    // 60-month (5Y) bullet loan resetting every 1M (30d -> 5.00% on CURVE_POINTS, vs 3.50% at 5Y)
+    // Customer spread = +250 bps -> 7.50% contract rate; FTP = 5.00% + 20 bps = 5.20% -> NIM = 23,000
+    const fl = {
+        id: store.nextId('instruments'),
+        name: 'Floating Revolver',
+        instrument_type: 'loan',
+        amortization_type: 'bullet',
+        rate_type: 'floating',
+        rate_index: 'SOFR',
+        reset_frequency_months: 1,
+        index_spread_bps: '250.00',
+        principal: '1000000',
+        contract_rate: '0.000000',
+        term_months: 60,
+        currency: 'USD',
+        cpr_percent: '0',
+        origination_date: '2026-01-15',
+        ftp_spread_override: null,
+        cpr_percent_override: null,
+        bucket_id: null,
+        locked_yield_curve_id: null,
+        locked_base_rate: null,
+    };
+    store.state.instruments.push(fl);
+
+    const r1 = calculateFtpForInstrument(store.state, fl, curve, 1, '2026-03-10');
+    assert.equal(r1.base_rate, '0.050000');
+    assert.equal(r1.ftp_rate, '0.052000');
+    assert.equal(fl.contract_rate, '0.075000');
+    assert.equal(r1.net_interest_margin, '23000.0000');
+
+    // Repricing gap places full $1M principal into 0-3M bucket despite 60M contractual term
+    const gap = calculateRepricingGap(store.state, '2026-03-10');
+    assert.equal(gap.buckets[0].rsa.toFixed(2), '1000000.00');
+    assert.equal(gap.net_gap_1y.toFixed(2), '1000000.00');
+
+    // Parallel +100 bps shock moves both floating loan customer income and FTP cost together -> ~0 NIM change
+    const shock = simulateYieldCurveShock(store.state, { scenarioKey: 'parallel_up_100', curveName: 'SOFR' });
+    assert.equal(shock.delta_nim_amount.toFixed(2), '0.00');
+
+    // New SOFR curve published -> floating loan resets (unlike fixed rate lock)
+    const newCurve = {
+        id: store.nextId('yield_curves'),
+        name: 'SOFR',
+        effective_date: '2026-06-01',
+        points: [{ tenor_days: 30, rate: '0.06' }, { tenor_days: 3600, rate: '0.06' }],
+    };
+    store.state.yield_curves.push(newCurve);
+    const r2 = calculateFtpForInstrument(store.state, fl, newCurve, 2, '2026-06-15');
+    assert.equal(r2.base_rate, '0.060000');
+    assert.equal(r2.ftp_rate, '0.062000');
+    assert.equal(fl.contract_rate, '0.085000');
+    assert.equal(r2.net_interest_margin, '23000.0000');
+});
+
+test('CSV importer parses floating-rate columns even when rate is computed from index + spread', () => {
+    const csv = 'source_id,name,instrument_type,rate_type,rate_index,reset_months,spread_bps,principal,term_months\nFL-1,SOFR Revolver,loan,floating,SOFR,3M,250,500000,36\n';
+    const { columns, rows } = rowsToTable(parseCsvRows(csv));
+    const { records } = importRows(columns, rows);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].rate_type, 'floating');
+    assert.equal(records[0].rate_index, 'SOFR');
+    assert.equal(records[0].reset_frequency_months, 3);
+    assert.equal(records[0].index_spread_bps, '250.00');
+    assert.equal(records[0].contract_rate, '0.000000');
+});

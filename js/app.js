@@ -1,5 +1,5 @@
 /**
- * SPA Router & Application Shell for TreasuryPulse FTP (GitHub Pages Edition).
+ * SPA Router & Application Shell for Open ALCO (GitHub Pages Edition).
  */
 import { BankStore } from './store.js';
 import { initializeDemoBank } from './demo.js';
@@ -53,7 +53,7 @@ function parseRoute() {
 
 function updateChrome(path, title) {
     document.getElementById('pageTitle').textContent = title;
-    document.title = `${title} — TreasuryPulse FTP`;
+    document.title = `${title} — Open ALCO`;
 
     document.querySelectorAll('.nav-link[data-route]').forEach(el => {
         const base = el.getAttribute('data-route');

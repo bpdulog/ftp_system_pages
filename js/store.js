@@ -1,5 +1,5 @@
 /**
- * Browser persistence layer for FTP System (GitHub Pages Edition).
+ * Browser persistence layer for Open ALCO (GitHub Pages Edition).
  * Uses IndexedDB with an in-memory mirror and localStorage fallback so
  * Live Bank and Sample Bank stay completely isolated.
  */

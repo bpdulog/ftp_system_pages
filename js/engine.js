@@ -18,6 +18,37 @@ export function monthsToDays(months) {
     return m * 30;
 }
 
+export function isFloatingInstrument(instrument) {
+    return String(instrument?.rate_type || 'fixed').toLowerCase() === 'floating';
+}
+
+export function getEffectivePricingMonths(instrument, remainingTermMonths = null) {
+    const baseTerm = remainingTermMonths != null ? Number(remainingTermMonths) : Number(instrument.term_months);
+    if (!isFloatingInstrument(instrument)) return baseTerm;
+    const reset = Number(instrument.reset_frequency_months || 1);
+    const validReset = Number.isInteger(reset) && reset > 0 ? reset : 1;
+    return Math.min(baseTerm, validReset);
+}
+
+export function resolveFloatingContractRate(state, instrument, asOfDate = null, fallbackCurve = null) {
+    if (
+        !isFloatingInstrument(instrument)
+        || instrument.index_spread_bps === null
+        || instrument.index_spread_bps === undefined
+        || instrument.index_spread_bps === ''
+    ) {
+        return Dec.from(instrument.contract_rate || 0);
+    }
+    const indexName = instrument.rate_index || fallbackCurve?.name || 'SOFR';
+    const indexCurve = familyCurveOrNull(state, indexName, asOfDate || todayIso()) || fallbackCurve;
+    if (!indexCurve || !indexCurve.points?.length) {
+        return Dec.from(instrument.contract_rate || 0);
+    }
+    const indexRate = linearInterpolate(monthsToDays(getEffectivePricingMonths(instrument)), indexCurve.points);
+    const spreadDec = Dec.from(instrument.index_spread_bps).mul(ONE_BP);
+    return decimalRound(dmax(indexRate.add(spreadDec), ZERO), 6);
+}
+
 export function linearInterpolate(targetDays, curvePoints) {
     if (targetDays < 0) throw new Error('Target tenor cannot be negative');
     const points = [...(curvePoints || [])].sort((a, b) => Number(a.tenor_days) - Number(b.tenor_days));
@@ -134,10 +165,16 @@ export function getEffectiveYieldCurve(state, bucket, fallbackCurve) {
     return fallbackCurve;
 }
 
-export function lockInstrumentFtp(state, instrument, defaultCurveName = 'SOFR') {
-    const curve = getCurveAsOf(state, defaultCurveName, instrument.origination_date || todayIso());
-    const baseRate = linearInterpolate(monthsToDays(instrument.term_months), curve.points);
+export function lockInstrumentFtp(state, instrument, defaultCurveName = 'SOFR', asOfDate = null) {
+    const floating = isFloatingInstrument(instrument);
+    const lookupDate = floating ? (asOfDate || todayIso()) : (instrument.origination_date || todayIso());
+    const curve = getCurveAsOf(state, defaultCurveName, lookupDate);
+    const pricingDays = monthsToDays(getEffectivePricingMonths(instrument));
+    const baseRate = linearInterpolate(pricingDays, curve.points);
     const [spread, ftpRate] = calculateFtpRate(baseRate, instrument.instrument_type, instrument.ftp_spread_override);
+    if (floating && instrument.index_spread_bps !== null && instrument.index_spread_bps !== undefined && instrument.index_spread_bps !== '') {
+        instrument.contract_rate = resolveFloatingContractRate(state, instrument, lookupDate, curve).toFixed(6);
+    }
     instrument.locked_yield_curve_id = curve.id;
     instrument.locked_base_rate = baseRate.toFixed(6);
     instrument.locked_ftp_spread = spread.toFixed(6);
@@ -199,6 +236,10 @@ export function buildInputSnapshot(state, yieldCurveName) {
             currency: i.currency || 'USD',
             cpr_percent: String(i.cpr_percent ?? '0'),
             origination_date: i.origination_date,
+            rate_type: String(i.rate_type || 'fixed').toLowerCase(),
+            rate_index: i.rate_index || null,
+            reset_frequency_months: i.reset_frequency_months != null ? Number(i.reset_frequency_months) : null,
+            index_spread_bps: i.index_spread_bps ?? null,
             locked_yield_curve_id: i.locked_yield_curve_id,
             locked_base_rate: i.locked_base_rate,
             source_system: i.source_system || null,
@@ -225,8 +266,10 @@ export function buildInputSnapshot(state, yieldCurveName) {
 }
 
 export function calculateFtpForInstrument(state, instrument, yieldCurve, calculationRunId = null, asOfDate = null) {
+    const asOf = asOfDate || todayIso();
     const bucket = getBucketForInstrument(state, instrument);
     const effectiveCurve = getEffectiveYieldCurve(state, bucket, yieldCurve);
+    const floating = isFloatingInstrument(instrument);
 
     let baseRate;
     let resultCurveId = null;
@@ -238,12 +281,25 @@ export function calculateFtpForInstrument(state, instrument, yieldCurve, calcula
         baseRate = Dec.from(poolRate);
     } else {
         if (!effectiveCurve) throw new Error(`Bucket '${bucket.name}' requires a yield curve`);
-        baseRate = getLockedBaseRate(state, instrument, effectiveCurve.name);
-        resultCurveId = instrument.locked_yield_curve_id;
+        if (floating) {
+            const resetCurve = bucket.yield_curve_id != null
+                ? effectiveCurve
+                : (familyCurveOrNull(state, effectiveCurve.name, asOf) || effectiveCurve);
+            baseRate = linearInterpolate(monthsToDays(getEffectivePricingMonths(instrument)), resetCurve.points);
+            instrument.locked_yield_curve_id = resetCurve.id;
+            instrument.locked_base_rate = baseRate.toFixed(6);
+            resultCurveId = resetCurve.id;
+        } else {
+            baseRate = getLockedBaseRate(state, instrument, effectiveCurve.name);
+            resultCurveId = instrument.locked_yield_curve_id;
+        }
     }
 
     const principal = Dec.from(instrument.principal);
-    const contractRate = Dec.from(instrument.contract_rate);
+    const contractRate = resolveFloatingContractRate(state, instrument, asOf, effectiveCurve);
+    if (floating && instrument.index_spread_bps !== null && instrument.index_spread_bps !== undefined && instrument.index_spread_bps !== '') {
+        instrument.contract_rate = contractRate.toFixed(6);
+    }
     const interest = decimalRound(principal.mul(contractRate), 4);
     const [ftpSpread, ftpRate] = calculateFtpRateWithBucket(
         baseRate, bucket, instrument.instrument_type, instrument.ftp_spread_override
@@ -256,7 +312,7 @@ export function calculateFtpForInstrument(state, instrument, yieldCurve, calcula
         instrument_id: instrument.id,
         yield_curve_id: resultCurveId,
         calculation_run_id: calculationRunId,
-        as_of_date: asOfDate || todayIso(),
+        as_of_date: asOf,
         base_rate: baseRate.round(6).toFixed(6),
         ftp_spread: ftpSpread.toFixed(6),
         ftp_rate: ftpRate.toFixed(6),
@@ -348,7 +404,20 @@ function nextMonthFirstIso(dateStr) {
 export function buildCashFlowSchedule(instrument, curvePoints, bucket = null) {
     monthsToDays(instrument.term_months);
     const principal = Dec.from(instrument.principal);
-    const contractRate = Dec.from(instrument.contract_rate);
+    const floating = isFloatingInstrument(instrument);
+    let contractRate = Dec.from(instrument.contract_rate || 0);
+    if (
+        floating
+        && curvePoints
+        && curvePoints.length
+        && curvePoints !== ZERO_CURVE
+        && instrument.index_spread_bps !== null
+        && instrument.index_spread_bps !== undefined
+        && instrument.index_spread_bps !== ''
+    ) {
+        const idxRate = linearInterpolate(monthsToDays(getEffectivePricingMonths(instrument)), curvePoints);
+        contractRate = decimalRound(dmax(idxRate.add(Dec.from(instrument.index_spread_bps).mul(ONE_BP)), ZERO), 6);
+    }
     const amortType = instrument.amortization_type || 'amortizing';
     const isLoan = String(instrument.instrument_type).toLowerCase() === 'loan';
 
@@ -380,7 +449,8 @@ export function buildCashFlowSchedule(instrument, curvePoints, bucket = null) {
             }
             baseRate = Dec.from(poolRate);
         } else {
-            baseRate = linearInterpolate(monthsToDays(remainingTermMonths), curvePoints);
+            const pricingMonths = getEffectivePricingMonths(instrument, remainingTermMonths);
+            baseRate = linearInterpolate(monthsToDays(pricingMonths), curvePoints);
         }
 
         const [ftpSpread, ftpRate] = bucket
@@ -429,6 +499,25 @@ export function buildCashFlowSchedule(instrument, curvePoints, bucket = null) {
     return schedule;
 }
 
+function resolveCurvePointsForSchedule(state, inst, bucket, effectiveCurve, asOf) {
+    if (!effectiveCurve || bucket.methodology === 'pooled') return [];
+    if (isFloatingInstrument(inst)) {
+        const resetCurve = bucket.yield_curve_id != null
+            ? effectiveCurve
+            : (familyCurveOrNull(state, effectiveCurve.name, asOf) || effectiveCurve);
+        const baseRate = linearInterpolate(monthsToDays(getEffectivePricingMonths(inst)), resetCurve.points);
+        inst.locked_yield_curve_id = resetCurve.id;
+        inst.locked_base_rate = baseRate.toFixed(6);
+        if (inst.index_spread_bps !== null && inst.index_spread_bps !== undefined && inst.index_spread_bps !== '') {
+            inst.contract_rate = resolveFloatingContractRate(state, inst, asOf, resetCurve).toFixed(6);
+        }
+        return resetCurve.points || [];
+    }
+    getLockedBaseRate(state, inst, effectiveCurve.name);
+    const lockedCurve = state.yield_curves.find(c => c.id === inst.locked_yield_curve_id);
+    return lockedCurve ? lockedCurve.points : [];
+}
+
 export async function generateCashFlowsForInstrument(store, instrumentId, yieldCurveName = 'SOFR', asOfDate = null, actor = 'browser-user') {
     const state = store.state;
     const asOf = asOfDate || todayIso();
@@ -452,12 +541,7 @@ export async function generateCashFlowsForInstrument(store, instrumentId, yieldC
         const yieldCurve = familyCurveOrNull(state, yieldCurveName, asOf);
         const bucket = getBucketForInstrument(state, inst);
         const effectiveCurve = getEffectiveYieldCurve(state, bucket, yieldCurve);
-        let curvePoints = [];
-        if (effectiveCurve && bucket.methodology !== 'pooled') {
-            getLockedBaseRate(state, inst, effectiveCurve.name);
-            const lockedCurve = state.yield_curves.find(c => c.id === inst.locked_yield_curve_id);
-            curvePoints = lockedCurve ? lockedCurve.points : [];
-        }
+        const curvePoints = resolveCurvePointsForSchedule(state, inst, bucket, effectiveCurve, asOf);
         const rows = buildCashFlowSchedule(inst, curvePoints, bucket).map(row => ({
             id: store.nextId('cash_flows'),
             instrument_id: inst.id,
@@ -504,12 +588,7 @@ export async function generateAllCashFlows(store, yieldCurveName = 'SOFR', asOfD
         for (const inst of state.instruments) {
             const bucket = getBucketForInstrument(state, inst);
             const effectiveCurve = getEffectiveYieldCurve(state, bucket, yieldCurve);
-            let curvePoints = [];
-            if (effectiveCurve && bucket.methodology !== 'pooled') {
-                getLockedBaseRate(state, inst, effectiveCurve.name);
-                const lockedCurve = state.yield_curves.find(c => c.id === inst.locked_yield_curve_id);
-                curvePoints = lockedCurve ? lockedCurve.points : [];
-            }
+            const curvePoints = resolveCurvePointsForSchedule(state, inst, bucket, effectiveCurve, asOf);
             for (const row of buildCashFlowSchedule(inst, curvePoints, bucket)) {
                 allRows.push({
                     id: store.nextId('cash_flows'),
@@ -752,6 +831,30 @@ export function calculateRepricingGap(state, asOfDate = null) {
         let cfs = cfsByInst.get(inst.id);
         if (!cfs || !cfs.length) {
             try { cfs = buildCashFlowSchedule(inst, ZERO_CURVE); } catch { cfs = []; }
+        }
+        if (isFloatingInstrument(inst)) {
+            let futurePrin = ZERO;
+            let maxDays = 0;
+            for (const cf of cfs) {
+                const days = daysBetweenIso(asOf, cf.payment_date);
+                if (days < 0) continue;
+                const cfPrin = Dec.from(cf.principal_payment || 0).add(Dec.from(cf.prepayment || 0));
+                if (cfPrin.lte(0)) continue;
+                futurePrin = futurePrin.add(cfPrin);
+                if (days > maxDays) maxDays = days;
+            }
+            if (futurePrin.gt(0)) {
+                const resetDays = Math.min(maxDays, monthsToDays(getEffectivePricingMonths(inst)));
+                const idx = bucketIdx(resetDays);
+                if (isLoan) {
+                    bucketRsa[idx] = bucketRsa[idx].add(futurePrin);
+                    bucketRsaRate[idx] = bucketRsaRate[idx].add(futurePrin.mul(cRate));
+                } else {
+                    bucketRsl[idx] = bucketRsl[idx].add(futurePrin);
+                    bucketRslRate[idx] = bucketRslRate[idx].add(futurePrin.mul(cRate));
+                }
+            }
+            continue;
         }
         for (const cf of cfs) {
             const cfPrin = Dec.from(cf.principal_payment || 0).add(Dec.from(cf.prepayment || 0));
@@ -1034,14 +1137,15 @@ export function simulateYieldCurveShock(
     let totalLoanPrincipal = ZERO;
 
     for (const inst of state.instruments) {
+        const floating = isFloatingInstrument(inst);
         const p = Dec.from(inst.principal || 0);
-        const cRate = Dec.from(inst.contract_rate || 0);
-        const tDays = monthsToDays(inst.term_months);
+        const cRate = floating ? resolveFloatingContractRate(state, inst, todayIso(), baseCurve) : Dec.from(inst.contract_rate || 0);
+        const tDays = monthsToDays(getEffectivePricingMonths(inst));
         const rBase = linearInterpolate(tDays, basePoints);
         const rShock = linearInterpolate(tDays, shockedPoints);
         const curveShift = rShock.sub(rBase);
 
-        const lockedBase = inst.locked_base_rate != null ? Dec.from(inst.locked_base_rate) : rBase;
+        const lockedBase = floating ? rBase : (inst.locked_base_rate != null ? Dec.from(inst.locked_base_rate) : rBase);
         let pooled = false;
         let ftpBase;
         try {
@@ -1051,18 +1155,20 @@ export function simulateYieldCurveShock(
         } catch {
             [, ftpBase] = calculateFtpRate(lockedBase, inst.instrument_type, inst.ftp_spread_override);
         }
-        const ftpShock = pooled ? ftpBase : ftpBase.add(curveShift);
+        const ftpShock = pooled ? ftpBase : dmax(ftpBase.add(curveShift), Dec.from('0.000100'));
         const isLoan = String(inst.instrument_type).toLowerCase() === 'loan';
 
         if (isLoan) {
             totalLoanPrincipal = totalLoanPrincipal.add(p);
             const inc = p.mul(cRate);
+            const shockLoanRate = floating ? dmax(cRate.add(curveShift), Dec.from('0.000100')) : cRate;
             baseIncome = baseIncome.add(inc);
-            shockIncome = shockIncome.add(inc);
+            shockIncome = shockIncome.add(p.mul(shockLoanRate));
             baseLoanCost = baseLoanCost.add(p.mul(ftpBase));
             shockLoanCost = shockLoanCost.add(p.mul(ftpShock));
         } else {
-            const depRateShock = dmax(cRate.add(curveShift.mul(beta)), Dec.from('0.000100'));
+            const depPassThrough = floating ? curveShift : curveShift.mul(beta);
+            const depRateShock = dmax(cRate.add(depPassThrough), Dec.from('0.000100'));
             baseExpense = baseExpense.add(p.mul(cRate));
             shockExpense = shockExpense.add(p.mul(depRateShock));
             baseDepRev = baseDepRev.add(p.mul(ftpBase));

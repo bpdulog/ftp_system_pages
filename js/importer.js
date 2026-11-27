@@ -15,12 +15,17 @@ export const FIELD_MAPPINGS = {
     amortization_type: ['amortization', 'amort_type', 'payment_type', 'loan_structure'],
     cpr_percent: ['cpr', 'prepayment_rate', 'prepayment', 'cpr_percent'],
     start_date: ['start_date', 'origination_date', 'date', 'loan_date', 'effective_date'],
+    rate_type: ['rate_type', 'pricing_type', 'fixed_floating', 'interest_type', 'rate_basis'],
+    rate_index: ['rate_index', 'index', 'benchmark', 'benchmark_index', 'ref_rate', 'reference_rate'],
+    reset_frequency_months: ['reset_frequency_months', 'reset_months', 'reset_freq', 'reset_frequency', 'repricing_months', 'repricing_freq'],
+    index_spread_bps: ['index_spread_bps', 'spread_bps', 'customer_spread_bps', 'margin_bps', 'index_spread'],
 };
 
 export const REQUIRED_FIELDS = ['name', 'principal', 'rate', 'term_months', 'instrument_type'];
 export const SUPPORTED_FIELDS = [
     'name', 'principal', 'rate', 'term_months', 'instrument_type',
     'source_id', 'amortization_type', 'cpr_percent', 'currency', 'start_date',
+    'rate_type', 'rate_index', 'reset_frequency_months', 'index_spread_bps',
 ];
 
 export class ImportValidationError extends Error {
@@ -205,6 +210,34 @@ export function normalizeAmortizationType(val) {
     throw new Error('amortization_type must be amortizing, bullet, or interest_only');
 }
 
+export function normalizeRateType(val) {
+    const v = valueText(val, 'rate_type').toLowerCase().trim();
+    if (['float', 'floating', 'variable', 'adjustable', 'arm'].includes(v)) return 'floating';
+    if (['fixed', 'fix'].includes(v)) return 'fixed';
+    throw new Error('rate_type must be fixed or floating');
+}
+
+export function normalizeResetMonths(val) {
+    const raw = valueText(val, 'reset_frequency_months').toUpperCase().trim();
+    const ym = /^(\d+)\s*(M|MO|MONTH|MONTHS|Y|YR|YEAR|YEARS)$/.exec(raw);
+    if (ym) {
+        const n = Number(ym[1]) * (ym[2].startsWith('Y') ? 12 : 1);
+        if (!Number.isInteger(n) || n <= 0) throw new Error('reset_frequency_months must be a positive integer');
+        return n;
+    }
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) throw new Error('reset_frequency_months must be a positive whole number of months');
+    return n;
+}
+
+export function normalizeSpreadBps(val) {
+    const text = valueText(val, 'index_spread_bps').replace(/bps/gi, '').trim();
+    let bps;
+    try { bps = Dec.from(text); } catch { throw new Error('index_spread_bps must be a number'); }
+    if (bps.lt(-1000) || bps.gt(5000)) throw new Error('index_spread_bps must be between -1000 and 5000');
+    return bps.round(2).toFixed(2);
+}
+
 export function normalizeDate(val) {
     if (val === null || val === undefined) return null;
     if (val instanceof Date && !Number.isNaN(val.getTime())) {
@@ -248,11 +281,19 @@ const GUIDANCE = {
     amortization_type: 'Use amortizing, bullet, or interest_only.',
     start_date: 'Use a date such as 2026-01-31.',
     cpr_percent: 'Provide a percentage from 0 to 100.',
+    rate_type: 'Use fixed or floating.',
+    rate_index: 'Use a benchmark curve name such as SOFR.',
+    reset_frequency_months: 'Provide positive reset months (e.g., 1, 3, 6, 12 or 3M).',
+    index_spread_bps: 'Provide customer spread over index in bps (e.g., 250).',
 };
 
 export function importRows(columns, rows, columnMapping = null) {
     const detected = resolveColumns(columns, columnMapping);
-    const missing = REQUIRED_FIELDS.filter(f => !(f in detected));
+    const missing = REQUIRED_FIELDS.filter(f => {
+        if (f in detected) return false;
+        if (f === 'rate' && 'rate_type' in detected && 'index_spread_bps' in detected) return false;
+        return true;
+    });
     if (missing.length) throw new Error(`Missing required columns: ${missing.join(', ')}`);
 
     const records = [];
@@ -269,14 +310,29 @@ export function importRows(columns, rows, columnMapping = null) {
                 currentCol = sourceCol;
                 const val = row[sourceCol];
                 currentVal = val;
-                if (field === 'rate') record.contract_rate = normalizeRate(val);
+                if (field === 'rate') {
+                    if ((val === null || val === undefined || String(val).trim() === '') && 'rate_type' in detected && 'index_spread_bps' in detected) {
+                        record.contract_rate = null;
+                    } else {
+                        record.contract_rate = normalizeRate(val);
+                    }
+                }
                 else if (field === 'principal') record.principal = normalizePrincipal(val);
                 else if (field === 'term_months') record.term_months = normalizeTerm(val, sourceCol);
                 else if (field === 'instrument_type') record.instrument_type = normalizeInstrumentType(val);
                 else if (field === 'amortization_type') record.amortization_type = normalizeAmortizationType(val);
                 else if (field === 'currency') record.currency = normalizeCurrency(val);
                 else if (field === 'start_date') record.origination_date = normalizeDate(val);
-                else if (field === 'cpr_percent') {
+                else if (field === 'rate_type') {
+                    record.rate_type = (val == null || String(val).trim() === '') ? 'fixed' : normalizeRateType(val);
+                } else if (field === 'rate_index') {
+                    const idxStr = val == null ? '' : String(val).trim().toUpperCase();
+                    record.rate_index = idxStr || null;
+                } else if (field === 'reset_frequency_months') {
+                    record.reset_frequency_months = (val == null || String(val).trim() === '') ? null : normalizeResetMonths(val);
+                } else if (field === 'index_spread_bps') {
+                    record.index_spread_bps = (val == null || String(val).trim() === '') ? null : normalizeSpreadBps(val);
+                } else if (field === 'cpr_percent') {
                     let t = valueText(val, 'cpr_percent');
                     if (t.endsWith('%')) t = t.slice(0, -1).trim();
                     const cpr = Dec.from(t);
@@ -290,6 +346,26 @@ export function importRows(columns, rows, columnMapping = null) {
                     const s = val == null ? '' : String(val).trim();
                     record.source_id = s ? s : null;
                 }
+            }
+            if (!record.rate_type) record.rate_type = 'fixed';
+            if (record.rate_type === 'floating') {
+                if (!record.rate_index) record.rate_index = 'SOFR';
+                if (!record.reset_frequency_months) record.reset_frequency_months = 3;
+                if (record.contract_rate == null) {
+                    if (record.index_spread_bps == null) {
+                        currentField = 'rate';
+                        throw new Error('rate or index_spread_bps is required for floating instruments');
+                    }
+                    record.contract_rate = '0.000000';
+                }
+            } else {
+                if (record.contract_rate == null) {
+                    currentField = 'rate';
+                    throw new Error('rate is required');
+                }
+                record.rate_index = null;
+                record.reset_frequency_months = null;
+                record.index_spread_bps = null;
             }
             if (!record.amortization_type) {
                 record.amortization_type = record.instrument_type === 'deposit' ? 'bullet' : 'amortizing';

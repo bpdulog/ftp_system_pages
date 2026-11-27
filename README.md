@@ -1,4 +1,4 @@
-# FTP System — Browser / GitHub Pages Edition
+# Open ALCO — Browser / GitHub Pages Edition
 
 A 100% client-side Funds Transfer Pricing (FTP) and Asset/Liability Management (ALM) web application rewritten in **Vanilla ES Modules + HTML/CSS + Chart.js + SheetJS + PptxGenJS** so it can be hosted directly on **GitHub Pages** with zero backend server or database.
 
